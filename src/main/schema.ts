@@ -59,6 +59,13 @@ export const SCHEMA_SQL = `
   CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
   CREATE INDEX IF NOT EXISTS idx_balance_date ON balance_history(date);
   CREATE INDEX IF NOT EXISTS idx_deposits_date ON deposits(date);
+
+  -- Служебные настройки. Ключ deleted_default:<имя> означает, что встроенную
+  -- категорию удалили намеренно, и создавать её при следующем старте не надо.
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
 `;
 
 export const DEFAULT_CATEGORIES: { name: string; type: string; sortOrder: number }[] = [
@@ -132,7 +139,17 @@ export function applySchema(database: Database): void {
     `INSERT OR IGNORE INTO subcategories (category_id, name, is_custom, sort_order) VALUES (?, ?, 0, ?)`
   );
 
+  // Категории, которые пользователь удалил осознанно, больше не создаём.
+  const dismissed = new Set(
+    (
+      database
+        .prepare(`SELECT key FROM settings WHERE key LIKE 'deleted_default:%'`)
+        .all() as { key: string }[]
+    ).map((r) => r.key.replace('deleted_default:', ''))
+  );
+
   for (const cat of DEFAULT_CATEGORIES) {
+    if (dismissed.has(cat.name)) continue;
     insertCategory.run(cat.name, cat.type, cat.sortOrder);
   }
 
@@ -141,8 +158,18 @@ export function applySchema(database: Database): void {
     .all() as { id: number; name: string }[];
   const categoryMap = Object.fromEntries(categoryRows.map((c) => [c.name, c.id]));
 
+  // Подкатегории, удалённые пользователем, тоже не создаём заново.
+  const dismissedSubs = new Set(
+    (
+      database
+        .prepare(`SELECT key FROM settings WHERE key LIKE 'deleted_sub:%'`)
+        .all() as { key: string }[]
+    ).map((r) => r.key.replace('deleted_sub:', ''))
+  );
+
   if (categoryMap['Закуп']) {
     ZAKUP_SUBCATEGORIES.forEach((sub, idx) => {
+      if (dismissedSubs.has(`Закуп:${sub}`)) return;
       insertSubcategory.run(categoryMap['Закуп'], sub, idx + 1);
     });
   }

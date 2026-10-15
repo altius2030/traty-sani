@@ -12,6 +12,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addSubcategory: (categoryId: number, name: string) => ipcRenderer.invoke('db:addSubcategory', categoryId, name),
   deleteCategory: (id: number) => ipcRenderer.invoke('db:deleteCategory', id),
   deleteSubcategory: (id: number) => ipcRenderer.invoke('db:deleteSubcategory', id),
+
+  makeBackup: () => ipcRenderer.invoke('db:makeBackup'),
+  getBackups: () => ipcRenderer.invoke('db:getBackups'),
+  getDeleteImpact: (kind: 'category' | 'subcategory', id: number) =>
+    ipcRenderer.invoke('db:getDeleteImpact', kind, id),
   
   getExpenses: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getExpenses', { startDate, endDate }),
   addExpense: (expense: { categoryId: number; subcategoryId?: number; amount: number; date: string; note?: string }) => 

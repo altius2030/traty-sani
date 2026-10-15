@@ -9,6 +9,12 @@ export interface ElectronAPI {
   ): Promise<{ id: number; name: string; is_custom: number }>;
   deleteCategory(id: number): Promise<{ success: boolean }>;
   deleteSubcategory(id: number): Promise<{ success: boolean }>;
+  makeBackup(): Promise<{ path: string }>;
+  getBackups(): Promise<{ name: string; path: string; size: number }[]>;
+  getDeleteImpact(
+    kind: 'category' | 'subcategory',
+    id: number
+  ): Promise<{ expenses: number; subcategories: number }>;
   getExpenses(startDate: string, endDate: string): Promise<any[]>;
   addExpense(expense: {
     categoryId: number;
@@ -37,6 +43,9 @@ export interface ElectronAPI {
 }
 
 declare global {
+  /** Версия приложения, подставляется на этапе сборки (см. vite.config.ts) */
+  const __APP_VERSION__: string;
+
   interface Window {
     electronAPI: ElectronAPI;
   }

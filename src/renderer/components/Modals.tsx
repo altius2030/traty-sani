@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X, Plus, Trash2, Banknote } from 'lucide-react';
 import type { Category, Subcategory } from '../types';
 import { toISODate } from '../lib/format';
@@ -16,22 +16,47 @@ interface AddExpenseModalProps {
   }) => void;
 }
 
+interface AddExpenseModalProps {
+  categories: Category[];
+  preselectedCategoryId?: number | null;
+  /** Подкатегория, выбранная в боковой панели — подставляется сразу */
+  preselectedSubcategoryId?: number | null;
+  onClose: () => void;
+  onSubmit: (data: {
+    categoryId: number;
+    subcategoryId?: number;
+    amount: number;
+    date: string;
+    note?: string;
+  }) => void;
+}
+
 export default function AddExpenseModal({
   categories,
   preselectedCategoryId,
+  preselectedSubcategoryId,
   onClose,
   onSubmit,
 }: AddExpenseModalProps) {
   const [categoryId, setCategoryId] = useState<number>(
     preselectedCategoryId ?? categories[0]?.id ?? 0
   );
-  const [subcategoryId, setSubcategoryId] = useState<number | ''>('');
+  const [subcategoryId, setSubcategoryId] = useState<number | ''>(
+    preselectedSubcategoryId ?? ''
+  );
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(toISODate(new Date()));
   const [note, setNote] = useState('');
 
+  // Сбрасываем подкатегорию только при реальной смене категории.
+  // На первом рендере эффект тоже сработал бы и стёр бы подставленное
+  // из боковой панели значение.
+  const firstRender = useRef(true);
   useEffect(() => {
-    // Сбрасываем подкатегорию при смене категории
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
     setSubcategoryId('');
   }, [categoryId]);
 
@@ -458,15 +483,13 @@ export function CategoryManagerModal({
                   }}
                 >
                   <span style={{ fontWeight: 600 }}>{cat.name}</span>
-                  {cat.is_custom === 1 && (
-                    <button
-                      className="action-btn"
-                      onClick={() => onDeleteCategory(cat.id)}
-                      title="Удалить категорию"
-                    >
-                      <Trash2 size={16} color="var(--accent-danger)" />
-                    </button>
-                  )}
+                  <button
+                    className="action-btn"
+                    onClick={() => onDeleteCategory(cat.id)}
+                    title="Удалить категорию"
+                  >
+                    <Trash2 size={16} color="var(--accent-danger)" />
+                  </button>
                 </div>
 
                 {subs.length > 0 && (
@@ -484,15 +507,13 @@ export function CategoryManagerModal({
                         <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
                           {sub.name}
                         </span>
-                        {sub.is_custom === 1 && (
-                          <button
-                            className="action-btn"
-                            onClick={() => onDeleteSubcategory(sub.id)}
-                            title="Удалить подкатегорию"
-                          >
-                            <Trash2 size={14} color="var(--accent-danger)" />
-                          </button>
-                        )}
+                        <button
+                          className="action-btn"
+                          onClick={() => onDeleteSubcategory(sub.id)}
+                          title="Удалить подкатегорию"
+                        >
+                          <Trash2 size={14} color="var(--accent-danger)" />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -525,6 +546,16 @@ export function CategoryManagerModal({
         </div>
 
         <div className="modal-footer">
+          <span
+            style={{
+              marginRight: 'auto',
+              fontSize: 12,
+              color: 'var(--text-muted)',
+              alignSelf: 'center',
+            }}
+          >
+            Траты Сани v{__APP_VERSION__}
+          </span>
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Закрыть
           </button>

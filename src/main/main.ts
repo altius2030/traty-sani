@@ -1,13 +1,71 @@
 ﻿import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import { join } from 'path';
-import { existsSync, mkdirSync, copyFileSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  copyFileSync,
+  readdirSync,
+  unlinkSync,
+  statSync,
+} from 'fs';
 import Database from 'better-sqlite3';
 import { applySchema } from './schema';
 
 const isDev = process.env.NODE_ENV === 'development';
 
+/** Сколько автоматических копий хранить */
+const BACKUP_KEEP = 10;
+
 let mainWindow: BrowserWindow | null = null;
 let db: Database.Database | null = null;
+
+function getBackupsDir(): string {
+  const dir = join(app.getPath('userData'), 'backups');
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+function timestamp(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
+    `-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+  );
+}
+
+/**
+ * Копия базы в ~/backups. Вызывается вручную из интерфейса и автоматически
+ * перед применением схемы — чтобы откатить неудачную миграцию.
+ */
+function makeBackup(dbPath: string, prefix: string): string | null {
+  if (!existsSync(dbPath)) return null;
+  try {
+    const dest = join(getBackupsDir(), `expenses-${prefix}-${timestamp()}.db`);
+    copyFileSync(dbPath, dest);
+
+    // Ротация: оставляем последние BACKUP_KEEP копий
+    const files = readdirSync(getBackupsDir())
+      .filter((f) => f.startsWith('expenses-') && f.endsWith('.db'))
+      .sort();
+    while (files.length > BACKUP_KEEP) {
+      const old = files.shift();
+      if (old) {
+        try {
+          unlinkSync(join(getBackupsDir(), old));
+        } catch {
+          /* файл занят — пропускаем */
+        }
+      }
+    }
+    return dest;
+  } catch (err) {
+    console.error('[backup] Не удалось создать копию:', err);
+    return null;
+  }
+}
 
 /** РЁР°Р±Р»РѕРЅРЅР°СЏ Р‘Р”, РІС€РёС‚Р°СЏ РІ СѓСЃС‚Р°РЅРѕРІС‰РёРє (resources/template/expenses.db) */
 function getBundledTemplatePath(): string | null {
@@ -50,6 +108,18 @@ function getDbPath(): string {
 
 function initDatabase(): Database.Database {
   const dbPath = getDbPath();
+  const existed = existsSync(dbPath);
+
+  // Автокопия ДО изменения схемы: если миграция что-то испортит,
+  // останется точка откката. Копия делается только для уже существующей БД,
+  // чтобы не плодить пустые файлы при первом запуске.
+  if (existed) {
+    const backup = makeBackup(dbPath, 'auto');
+    if (backup) {
+      console.log('[backup] Автокопия:', backup);
+    }
+  }
+
   const database = new Database(dbPath);
 
   // Схема + дефолтные категории (идемпотентно).
@@ -153,13 +223,94 @@ ipcMain.handle('db:addSubcategory', (_, categoryId: number, name: string) => {
   return { id: result.lastInsertRowid, name, is_custom: 1 };
 });
 
+// ——— Резервные копии ———
+ipcMain.handle('db:makeBackup', () => {
+  const dbPath = getDbPath();
+  const dest = makeBackup(dbPath, 'manual');
+  if (!dest) throw new Error('Не удалось создать резервную копию');
+  return { path: dest };
+});
+
+ipcMain.handle('db:getBackups', () => {
+  const dir = getBackupsDir();
+  try {
+    return readdirSync(dir)
+      .filter((f) => f.startsWith('expenses-') && f.endsWith('.db'))
+      .map((f) => {
+        const full = join(dir, f);
+        return { name: f, path: full, size: statSync(full).size };
+      })
+      .sort((a, b) => (a.name < b.name ? 1 : -1));
+  } catch {
+    return [];
+  }
+});
+
+/**
+ * Сколько трат и подкатегорий будет затронуто удалением.
+ * Интерфейс показывает это в подтверждении, чтобы удаление не было сюрпризом.
+ */
+ipcMain.handle('db:getDeleteImpact', (_, kind: 'category' | 'subcategory', id: number) => {
+  if (kind === 'category') {
+    const expenses = db!.prepare('SELECT COUNT(*) c FROM expenses WHERE category_id = ?').get(id) as { c: number };
+    const subs = db!.prepare('SELECT COUNT(*) c FROM subcategories WHERE category_id = ?').get(id) as { c: number };
+    return { expenses: expenses.c, subcategories: subs.c };
+  }
+  const expenses = db!.prepare('SELECT COUNT(*) c FROM expenses WHERE subcategory_id = ?').get(id) as {
+    c: number;
+  };
+  return { expenses: expenses.c, subcategories: 0 };
+});
+
+/**
+ * Удаление категории. Разрешено и для встроенных («Закуп», «Такси») —
+ * ограничения на is_custom больше нет.
+ * Траты этой категории удаляются вместе с ней: оставить их было бы хуже,
+ * т.к. в списках они выбираются INNER JOIN'ом по категории и просто исчезли бы
+ * из интерфейса вместе с суммами в отчёте.
+ */
 ipcMain.handle('db:deleteCategory', (_, id: number) => {
-  db!.prepare('DELETE FROM categories WHERE id = ? AND is_custom = 1').run(id);
+  const row = db!.prepare('SELECT name, is_custom FROM categories WHERE id = ?').get(id) as
+    | { name: string; is_custom: number }
+    | undefined;
+
+  const run = db!.transaction((categoryId: number, name: string, isCustom: number) => {
+    // Встроенную категорию запоминаем как удалённую, иначе applySchema()
+    // создаст её заново при следующем запуске.
+    if (isCustom === 0) {
+      db!.prepare(
+        `INSERT OR REPLACE INTO settings (key, value) VALUES (?, datetime('now'))`
+      ).run(`deleted_default:${name}`);
+    }
+    db!.prepare('DELETE FROM expenses WHERE category_id = ?').run(categoryId);
+    db!.prepare('DELETE FROM subcategories WHERE category_id = ?').run(categoryId);
+    db!.prepare('DELETE FROM categories WHERE id = ?').run(categoryId);
+  });
+
+  if (!row) throw new Error('Категория не найдена');
+  run(id, row.name, row.is_custom);
   return { success: true };
 });
 
 ipcMain.handle('db:deleteSubcategory', (_, id: number) => {
-  db!.prepare('DELETE FROM subcategories WHERE id = ? AND is_custom = 1').run(id);
+  const row = db!.prepare(`
+      SELECT s.name, s.is_custom, c.name AS category_name
+      FROM subcategories s JOIN categories c ON c.id = s.category_id
+      WHERE s.id = ?
+    `).get(id) as { name: string; is_custom: number; category_name: string } | undefined;
+  if (!row) throw new Error('Подкатегория не найдена');
+
+  const run = db!.transaction((subId: number) => {
+    // Встроенную подкатегорию запоминаем, иначе applySchema() создаст её заново
+    if (row.is_custom === 0) {
+      db!.prepare(
+        `INSERT OR REPLACE INTO settings (key, value) VALUES (?, datetime('now'))`
+      ).run(`deleted_sub:${row.category_name}:${row.name}`);
+    }
+    db!.prepare('DELETE FROM expenses WHERE subcategory_id = ?').run(subId);
+    db!.prepare('DELETE FROM subcategories WHERE id = ?').run(subId);
+  });
+  run(id);
   return { success: true };
 });
 

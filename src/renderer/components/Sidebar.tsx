@@ -7,6 +7,7 @@ import {
   Plus,
   Trash2,
   Wallet,
+  Save,
 } from 'lucide-react';
 import type { Category, Subcategory } from '../types';
 import { formatMoney } from '../lib/format';
@@ -22,6 +23,7 @@ interface SidebarProps {
   onAddExpense: (categoryId: number, subcategoryId?: number) => void;
   onOpenCategoryManager: () => void;
   onOpenBalance: () => void;
+  onMakeBackup: () => void;
   onDeleteCategory: (id: number) => void;
   onDeleteSubcategory: (id: number) => void;
 }
@@ -50,6 +52,7 @@ export default function Sidebar({
   onAddExpense,
   onOpenCategoryManager,
   onOpenBalance,
+  onMakeBackup,
   onDeleteCategory,
   onDeleteSubcategory,
 }: SidebarProps) {
@@ -108,18 +111,16 @@ export default function Sidebar({
                     >
                       <Plus size={16} />
                     </button>
-                    {cat.is_custom === 1 && (
-                      <button
-                        className="btn-icon"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteCategory(cat.id);
-                        }}
-                        title="Удалить категорию"
-                      >
-                        <Trash2 size={14} color="var(--accent-danger)" />
-                      </button>
-                    )}
+                    <button
+                      className="btn-icon"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteCategory(cat.id);
+                      }}
+                      title="Удалить категорию"
+                    >
+                      <Trash2 size={14} color="var(--accent-danger)" />
+                    </button>
                   </div>
                 </div>
 
@@ -147,18 +148,16 @@ export default function Sidebar({
                         }}
                       >
                         <span>{sub.name}</span>
-                        {sub.is_custom === 1 && (
-                          <button
-                            className="action-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onDeleteSubcategory(sub.id);
-                            }}
-                            title="Удалить подкатегорию"
-                          >
-                            <Trash2 size={13} color="var(--accent-danger)" />
-                          </button>
-                        )}
+                        <button
+                          className="action-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onDeleteSubcategory(sub.id);
+                          }}
+                          title="Удалить подкатегорию"
+                        >
+                          <Trash2 size={13} color="var(--accent-danger)" />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -225,6 +224,10 @@ export default function Sidebar({
         <button className="add-btn" onClick={onOpenBalance} style={{ marginTop: 12 }}>
           <Wallet size={16} />
           Указать остаток
+        </button>
+        <button className="add-btn" onClick={onMakeBackup} style={{ marginTop: 8 }}>
+          <Save size={16} />
+          Резервная копия
         </button>
       </div>
     </aside>

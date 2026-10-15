@@ -1,4 +1,5 @@
 import { useEffect, useState, Fragment } from 'react';
+import ReportCharts from './ReportCharts';
 import { X, FileDown, TrendingDown, Wallet, Receipt, Banknote } from 'lucide-react';
 import type { Period, Report } from '../types';
 import { formatMoney, getPeriodLabel } from '../lib/format';
@@ -179,7 +180,9 @@ export default function ReportModal({ period, onClose, onExport }: ReportModalPr
               </div>
             ) : (
               <>
-                {report.expenses.length > 0 && (
+                <ReportCharts report={report} />
+
+            {report.expenses.length > 0 && (
                   <div className="report-breakdown">
                 <div className="breakdown-title">Расходы по категориям</div>
                 <table className="breakdown-table">

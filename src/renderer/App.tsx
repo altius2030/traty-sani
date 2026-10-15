@@ -8,6 +8,7 @@ import AddExpenseModal, {
   ConfirmModal,
 } from './components/Modals';
 import ReportModal from './components/ReportModal';
+import { buildChartCsv } from './components/ReportCharts';
 import ToastContainer from './components/ToastContainer';
 import type {
   Category,
@@ -25,6 +26,27 @@ import {
   getPresetPeriod,
   parseCategoriesSubcategories,
 } from './lib/format';
+
+/** Текст подтверждения удаления: прямо говорим, сколько трат пропадёт */
+function buildDeleteMessage(
+  kind: 'category' | 'subcategory',
+  impact?: { expenses: number; subcategories: number }
+): string {
+  const noun = kind === 'category' ? 'эту категорию' : 'эту подкатегорию';
+  const parts: string[] = [];
+
+  if (impact && impact.subcategories > 0) {
+    parts.push(`${impact.subcategories} подкатегорий`);
+  }
+  if (impact && impact.expenses > 0) {
+    parts.push(`${impact.expenses} трат`);
+  }
+
+  if (parts.length === 0) {
+    return `Вы уверены, что хотите удалить ${noun}?`;
+  }
+  return `Удалить ${noun}? Вместе с ней будут удалены: ${parts.join(' и ')}. Отменить это действие нельзя.`;
+}
 
 function App() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -50,7 +72,12 @@ function App() {
     | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<
-    { kind: 'expense' | 'deposit' | 'category' | 'subcategory'; id: number } | null
+    | {
+        kind: 'expense' | 'deposit' | 'category' | 'subcategory';
+        id: number;
+        impact?: { expenses: number; subcategories: number };
+      }
+    | null
   >(null);
 
   // ——— Уведомления ———
@@ -169,6 +196,12 @@ function App() {
     setConfirmDelete({ kind: 'deposit', id });
   };
 
+  /** Считаем, сколько трат и подкатегорий исчезнет вместе с удалением */
+  const askDelete = async (kind: 'category' | 'subcategory', id: number) => {
+    const impact = await window.electronAPI.getDeleteImpact(kind, id);
+    setConfirmDelete({ kind, id, impact });
+  };
+
   const handleConfirmDelete = async () => {
     if (!confirmDelete) return;
     const { kind, id } = confirmDelete;
@@ -217,6 +250,15 @@ function App() {
       await loadCategories();
     } catch (err: any) {
       addToast('Ошибка при добавлении подкатегории', 'error');
+    }
+  };
+
+  const handleMakeBackup = async () => {
+    try {
+      const res = await window.electronAPI.makeBackup();
+      addToast(`Копия сохранена: ${res.path.split(/[\\/]/).pop()}`);
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Не удалось создать копию', 'error');
     }
   };
 
@@ -275,6 +317,9 @@ function App() {
       lines.push(`${exp.date};${cat};${sub};${exp.amount.toFixed(2)};${note}`);
     }
 
+    // Данные, на которых построены графики, — отдельными секциями
+    lines.push(...buildChartCsv(rep));
+
     const content = '\uFEFF' + lines.join('\n');
     const filename = `otchet_${p.startDate}_${p.endDate}.csv`;
 
@@ -302,7 +347,9 @@ function App() {
     <div className="app" data-platform={window.electronAPI.platform}>
       {/* Панель заголовка: перетаскивание окна + отступ под системные кнопки */}
       <div className="drag-region">
-        <span className="drag-region-title">Траты Сани</span>
+        <span className="drag-region-title">
+          Траты Сани <span className="drag-region-version">v{__APP_VERSION__}</span>
+        </span>
       </div>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -319,8 +366,9 @@ function App() {
           }
           onOpenCategoryManager={() => setModal({ type: 'categories' })}
           onOpenBalance={() => setModal({ type: 'balance' })}
-          onDeleteCategory={(id) => setConfirmDelete({ kind: 'category', id })}
-          onDeleteSubcategory={(id) => setConfirmDelete({ kind: 'subcategory', id })}
+          onMakeBackup={handleMakeBackup}
+          onDeleteCategory={(id) => askDelete('category', id)}
+          onDeleteSubcategory={(id) => askDelete('subcategory', id)}
         />
 
         <ExpenseTable
@@ -348,6 +396,7 @@ function App() {
         <AddExpenseModal
           categories={categories}
           preselectedCategoryId={modal.categoryId}
+          preselectedSubcategoryId={modal.subcategoryId}
           onClose={() => setModal(null)}
           onSubmit={handleAddExpense}
         />
@@ -367,8 +416,8 @@ function App() {
           onClose={() => setModal(null)}
           onAddCategory={handleAddCategory}
           onAddSubcategory={handleAddSubcategory}
-          onDeleteCategory={(id) => setConfirmDelete({ kind: 'category', id })}
-          onDeleteSubcategory={(id) => setConfirmDelete({ kind: 'subcategory', id })}
+          onDeleteCategory={(id) => askDelete('category', id)}
+          onDeleteSubcategory={(id) => askDelete('subcategory', id)}
         />
       )}
 
@@ -385,8 +434,8 @@ function App() {
               : confirmDelete.kind === 'deposit'
               ? 'Вы уверены, что хотите удалить это внесение?'
               : confirmDelete.kind === 'category'
-              ? 'Вы уверены, что хотите удалить эту категорию? Все траты в ней останутся без категории.'
-              : 'Вы уверены, что хотите удалить эту подкатегорию?'
+              ? buildDeleteMessage('category', confirmDelete.impact)
+              : buildDeleteMessage('subcategory', confirmDelete.impact)
           }
           confirmText="Удалить"
           danger
