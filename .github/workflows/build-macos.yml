@@ -36,6 +36,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build:mac
 
+      # Проверяем, что собранный бандл валиден. Если эта проверка падает —
+      # macOS при запуске скажет «приложение повреждено».
+      - name: Проверка подписи и архитектуры
+        run: |
+          APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)
+          echo "app: $APP"
+          codesign --verify --deep --strict --verbose=2 "$APP" || true
+          echo "--- артетектуры ---"
+          lipo -archs "$APP/Contents/MacOS/"* || true
+          echo "--- plist ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist"
+
       - name: Готовый образ
         uses: actions/upload-artifact@v4
         with:

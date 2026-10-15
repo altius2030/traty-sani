@@ -75,13 +75,12 @@
       ],
       "category": "public.app-category.finance",
       "darkModeSupport": true,
-      "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "identity": null
     },
     "dmg": {
       "title": "Траты Сани ${version}",
-      "artifactName": "Траты Сани ${version} arm64.${ext}"
+      "artifactName": "Traty-Sani-${version}-arm64.${ext}"
     },
     "nsis": {
       "oneClick": false,
