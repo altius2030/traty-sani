@@ -3,6 +3,10 @@ name: Build macOS (arm64)
 # Собирает .dmg на macOS-раннере GitHub.
 # С Windows собрать macOS-версию нельзя: electron-builder требует системные
 # утилиты macOS для создания образа диска.
+#
+# Важно: подпись наносится отдельным шагом ДО создания образа. Если позволить
+# electron-builder собрать .dmg самому, он перезапишет бандл и подпись пропадёт —
+# macOS сочтёт приложение повреждённым.
 
 on:
   workflow_dispatch:
@@ -28,37 +32,41 @@ jobs:
       - name: Установка зависимостей
         run: npm ci
 
+      - name: Подготовка (renderer, main, шаблонная БД)
+        run: npm run build && npm run build:template-db
+
       - name: Сборка .app
         env:
-          # Не ищем сертификат в Keychain — подписываем ad-hoc (identity: "-" в
-          # package.json). Раньше подпись пропускалась целиком, и оставалась
-          # только подпись линкера: macOS сообщал «приложение повреждено».
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: electron-builder --mac --arm64 --dir
 
-      # Подпись должна быть нанесена ДО создания образа, иначе в .dmg попадёт
-      # неподписанная копия. Подписываем и запечатываем бандл целиком.
-      - name: Подпись бандла (ad-hoc) и снятие карантина
+      - name: Подпись бандла (ad-hoc)
         run: |
           set -e
           APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)
           echo "app: $APP"
+          [ -n "$APP" ] || { echo "app не найден"; exit 1; }
+
+          # Снимаем карантин и переподписываем бандл целиком, чтобы
+          # запечатались ресурсы и связался Info.plist.
           xattr -cr "$APP"
           codesign --force --deep --sign - "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
-          echo "--- после подписи ---"
-          codesign -dv --verbose=2 "$APP"
-
-      - name: Проверка архитектуры
-        run: |
-          APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)
+          echo "--- итоговая подпись ---"
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep -Ei "signature|identifier|flags|sealed"
+          echo "--- архитектура ---"
           lipo -archs "$APP/Contents/MacOS/"*
 
-      - name: Сборка .dmg из подписанного бандла
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: electron-builder --mac --arm64
+      - name: Создание .dmg из подписанного бандла
+        run: |
+          set -e
+          APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)
+          STAGE=$(mktemp -d)
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          DMG="release/Traty-Sani-1.0.0-arm64.dmg"
+          hdiutil create -volname "Traty Sani" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+          ls -lh release/*.dmg
 
       - name: Готовый образ
         uses: actions/upload-artifact@v4

@@ -76,7 +76,7 @@
       "category": "public.app-category.finance",
       "darkModeSupport": true,
       "gatekeeperAssess": false,
-      "identity": "-"
+      "identity": null
     },
     "dmg": {
       "title": "Траты Сани ${version}",
