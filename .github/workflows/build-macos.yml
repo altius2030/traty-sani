@@ -59,19 +59,28 @@ jobs:
         run: |
           set -e
           APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)
+          VERSION=$(node -p "require('./package.json').version")
           STAGE=$(mktemp -d)
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
-          DMG="release/Traty-Sani-1.0.0-arm64.dmg"
-          # Перезаписываем образ, созданный electron-builder'ом без подписи.
-          rm -f "$DMG"
+
+          # electron-builder уже создал свой .dmg — БЕЗ подписи. Удаляем все
+          # образы, иначе в артефакт попадут оба, и пользователь откроет
+          # неподписанный (macOS сочтёт его повреждённым).
+          rm -f release/*.dmg
+
+          DMG="release/Traty-Sani-${VERSION}-arm64.dmg"
           hdiutil create -volname "Traty Sani" -srcfolder "$STAGE" -ov -format UDZO "$DMG"
+          echo "--- содержимое release ---"
           ls -lh release/*.dmg
+          COUNT=$(ls release/*.dmg | wc -l | tr -d ' ')
+          [ "$COUNT" = "1" ] || { echo "ожидался 1 образ, найдено $COUNT"; exit 1; }
 
       - name: Готовый образ
         uses: actions/upload-artifact@v4
         with:
-          name: Traty-Sani-mac-arm64
+          # Версия в имени — чтобы не перепутать с предыдущими сборками
+          name: Traty-Sani-mac-arm64-v${{ github.run_number }}
           path: release/*.dmg
           if-no-files-found: error
           retention-days: 30

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, Plus, Trash2, Banknote } from 'lucide-react';
 import type { Category, Subcategory } from '../types';
 import { toISODate } from '../lib/format';
+import { CATEGORY_ICONS, getCategoryIcon } from '../lib/icons';
 
 interface AddExpenseModalProps {
   categories: Category[];
@@ -411,6 +412,7 @@ interface AddCategoryModalProps {
   onAddSubcategory: (categoryId: number, name: string) => void;
   onDeleteCategory: (id: number) => void;
   onDeleteSubcategory: (id: number) => void;
+  onSetIcon: (id: number, icon: string | null) => void;
 }
 
 export function CategoryManagerModal({
@@ -420,9 +422,11 @@ export function CategoryManagerModal({
   onAddSubcategory,
   onDeleteCategory,
   onDeleteSubcategory,
+  onSetIcon,
 }: AddCategoryModalProps) {
   const [newCategory, setNewCategory] = useState('');
   const [newSubcategory, setNewSubcategory] = useState<Record<number, string>>({});
+  const [iconPickerFor, setIconPickerFor] = useState<number | null>(null);
 
   const handleAddCategory = (e: React.FormEvent) => {
     e.preventDefault();
@@ -482,7 +486,41 @@ export function CategoryManagerModal({
                     borderBottom: '1px solid var(--border-color)',
                   }}
                 >
+                  <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                  }}
+                >
+                  <button
+                    className="icon-pick-btn"
+                    onClick={() =>
+                      setIconPickerFor(iconPickerFor === cat.id ? null : cat.id)
+                    }
+                    title="Выбрать значок"
+                    aria-label={`Значок категории ${cat.name}`}
+                  >
+                    {(() => {
+                      const def = getCategoryIcon(cat.icon);
+                      const Icon = def.Icon;
+                      return (
+                        <Icon
+                          size={17}
+                          style={{
+                            color: def.color,
+                            background: `${def.color}22`,
+                            borderRadius: 6,
+                            padding: 2,
+                            boxSizing: 'content-box',
+                          }}
+                        />
+                      );
+                    })()}
+                  </button>
                   <span style={{ fontWeight: 600 }}>{cat.name}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button
                     className="action-btn"
                     onClick={() => onDeleteCategory(cat.id)}
@@ -491,6 +529,41 @@ export function CategoryManagerModal({
                     <Trash2 size={16} color="var(--accent-danger)" />
                   </button>
                 </div>
+              </div>
+
+              {iconPickerFor === cat.id && (
+                <div className="icon-picker">
+                  <div className="icon-picker-grid">
+                    {CATEGORY_ICONS.map((def) => {
+                      const Icon = def.Icon;
+                      const active = (cat.icon || 'cart') === def.key;
+                      return (
+                        <button
+                          key={def.key}
+                          className={`icon-picker-item ${active ? 'active' : ''}`}
+                          onClick={() => {
+                            onSetIcon(cat.id, def.key);
+                            setIconPickerFor(null);
+                          }}
+                          title={def.label}
+                          aria-label={def.label}
+                        >
+                          <Icon
+                            size={18}
+                            style={{
+                              color: def.color,
+                              background: `${def.color}22`,
+                              borderRadius: 7,
+                              padding: 3,
+                              boxSizing: 'content-box',
+                            }}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
                 {subs.length > 0 && (
                   <div style={{ marginLeft: 16, marginTop: 8 }}>

@@ -1,6 +1,7 @@
 import { Trash2, CalendarDays, FileDown, Plus, Banknote, Receipt } from 'lucide-react';
 import type { Deposit, Expense, Period, PeriodPreset } from '../types';
 import { formatMoney, getPeriodLabel, toISODate } from '../lib/format';
+import { getCategoryIcon as getCategoryIconDef } from '../lib/icons';
 
 export type MainTab = 'expenses' | 'deposits';
 
@@ -198,9 +199,27 @@ export default function ExpenseTable({
                         })}
                       </td>
                       <td>
-                        <span className={`category-badge ${badgeClass}`}>
-                          {expense.category_name}
-                        </span>
+                        <div className="cat-cell">
+                          {(() => {
+                            const def = getCategoryIconDef(expense.category_icon);
+                            const I = def.Icon;
+                            return (
+                              <I
+                                size={15}
+                                style={{
+                                  color: def.color,
+                                  background: `${def.color}22`,
+                                  borderRadius: 6,
+                                  padding: 3,
+                                  boxSizing: 'content-box',
+                                }}
+                              />
+                            );
+                          })()}
+                          <span className={`category-badge ${badgeClass}`}>
+                            {expense.category_name}
+                          </span>
+                        </div>
                       </td>
                       <td style={{ color: 'var(--text-secondary)' }}>
                         {expense.subcategory_name || '—'}

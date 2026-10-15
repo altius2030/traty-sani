@@ -866,6 +866,61 @@ input::placeholder {
   font-variant-numeric: tabular-nums;
 }
 
+/* ——— Выбор значка категории ——— */
+.icon-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  transition: var(--transition);
+  flex-shrink: 0;
+}
+
+.icon-pick-btn:hover {
+  border-color: var(--accent-primary);
+  background: var(--bg-hover);
+}
+
+.icon-picker {
+  margin: 12px 0 4px;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(40px, 1fr));
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.icon-picker-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background: var(--bg-secondary);
+  transition: var(--transition);
+}
+
+.icon-picker-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-color);
+}
+
+.icon-picker-item.active {
+  border-color: var(--accent-primary);
+  background: rgba(0, 212, 170, 0.12);
+}
+
 /* ——— Графики в отчёте ——— */
 .charts-block {
   display: grid;

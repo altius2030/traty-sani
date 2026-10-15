@@ -7,6 +7,7 @@ export interface ElectronAPI {
     categoryId: number,
     name: string
   ): Promise<{ id: number; name: string; is_custom: number }>;
+  setCategoryIcon(id: number, icon: string | null): Promise<{ success: boolean }>;
   deleteCategory(id: number): Promise<{ success: boolean }>;
   deleteSubcategory(id: number): Promise<{ success: boolean }>;
   makeBackup(): Promise<{ path: string }>;

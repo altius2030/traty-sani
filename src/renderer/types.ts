@@ -11,6 +11,8 @@ export interface Category {
   type: string;
   is_custom: number;
   sort_order: number;
+  /** Ключ значка из набора в lib/icons.ts */
+  icon?: string | null;
   subcategories?: Subcategory[] | string | null;
 }
 
@@ -22,6 +24,7 @@ export interface Expense {
   date: string;
   note: string | null;
   category_name: string;
+  category_icon?: string | null;
   subcategory_name: string | null;
 }
 

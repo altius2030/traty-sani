@@ -13,7 +13,8 @@ export const SCHEMA_SQL = `
     name TEXT NOT NULL UNIQUE,
     type TEXT NOT NULL DEFAULT 'expense',
     is_custom INTEGER NOT NULL DEFAULT 0,
-    sort_order INTEGER NOT NULL DEFAULT 0
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    icon TEXT
   );
 
   CREATE TABLE IF NOT EXISTS subcategories (
@@ -73,6 +74,11 @@ export const DEFAULT_CATEGORIES: { name: string; type: string; sortOrder: number
   { name: 'Такси', type: 'expense', sortOrder: 2 },
 ];
 
+export const DEFAULT_CATEGORY_ICONS: Record<string, string> = {
+  Закуп: 'cart',
+  Такси: 'car',
+};
+
 export const ZAKUP_SUBCATEGORIES = [
   'Российский',
   'Рыба',
@@ -131,6 +137,25 @@ export function applySchema(database: Database): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_subcategories_unique
       ON subcategories(category_id, name);
   `);
+
+  // Миграция: колонка значка добавлена в версии 1.0.6. В SQLite нельзя
+  // ALTER TABLE ... ADD COLUMN IF NOT EXISTS, поэтому проверяем заранее.
+  // Для БД из установщика колонка уже есть в SCHEMA_SQL.
+  const columns = database.prepare('PRAGMA table_info(categories)').all() as {
+    name: string;
+  }[];
+  if (!columns.some((c) => c.name === 'icon')) {
+    database.exec(`ALTER TABLE categories ADD COLUMN icon TEXT`);
+    console.log('[schema] Добавлена колонка categories.icon');
+  }
+
+  // Встроенным категориям назначаем значки по умолчанию
+  const assignIcon = database.prepare(
+    `UPDATE categories SET icon = ? WHERE name = ? AND (icon IS NULL OR icon = '')`
+  );
+  for (const [name, icon] of Object.entries(DEFAULT_CATEGORY_ICONS)) {
+    assignIcon.run(icon, name);
+  }
 
   const insertCategory = database.prepare(
     `INSERT OR IGNORE INTO categories (name, type, is_custom, sort_order) VALUES (?, ?, 0, ?)`

@@ -223,6 +223,13 @@ ipcMain.handle('db:addSubcategory', (_, categoryId: number, name: string) => {
   return { id: result.lastInsertRowid, name, is_custom: 1 };
 });
 
+/** Смена значка категории */
+ipcMain.handle('db:setCategoryIcon', (_, id: number, icon: string | null) => {
+  const clean = icon && typeof icon === 'string' ? icon.trim() : null;
+  db!.prepare('UPDATE categories SET icon = ? WHERE id = ?').run(clean || null, id);
+  return { success: true };
+});
+
 // ——— Резервные копии ———
 ipcMain.handle('db:makeBackup', () => {
   const dbPath = getDbPath();
@@ -316,7 +323,7 @@ ipcMain.handle('db:deleteSubcategory', (_, id: number) => {
 
 ipcMain.handle('db:getExpenses', (_, { startDate, endDate }: { startDate: string; endDate: string }) => {
   return db!.prepare(`
-    SELECT e.*, c.name as category_name, s.name as subcategory_name
+    SELECT e.*, c.name as category_name, c.icon as category_icon, s.name as subcategory_name
     FROM expenses e
     JOIN categories c ON e.category_id = c.id
     LEFT JOIN subcategories s ON e.subcategory_id = s.id

@@ -1,5 +1,6 @@
 import type { Report } from '../types';
 import { formatMoney } from '../lib/format';
+import { getCategoryColor } from '../lib/icons';
 
 /**
  * Графики для отчёта. Сделаны на голом SVG, без внешних библиотек:
@@ -127,11 +128,23 @@ function BarChart({ data }: { data: { label: string; expense: number; deposit: n
 }
 
 export default function ReportCharts({ report }: { report: Report }) {
-  // Категории в порядке убывания суммы
+  // Цвет берём из значка категории, чтобы кольцо совпадало с боковой панелью
+  const iconByCategory = new Map<string, string | null>();
+  for (const e of report.expenses) {
+    if (!iconByCategory.has(e.category_name)) {
+      iconByCategory.set(e.category_name, e.category_icon ?? null);
+    }
+  }
+
   const slices: Slice[] = Object.entries(report.byCategory)
     .map(([label, v]) => ({ label, value: v.total, color: '' }))
     .sort((a, b) => b.value - a.value)
-    .map((s, i) => ({ ...s, color: PALETTE[i % PALETTE.length] }));
+    .map((s, i) => ({
+      ...s,
+      color: iconByCategory.has(s.label)
+        ? getCategoryColor(iconByCategory.get(s.label))
+        : PALETTE[i % PALETTE.length],
+    }));
 
   const total = slices.reduce((s, x) => s + x.value, 0);
 

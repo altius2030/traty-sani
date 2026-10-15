@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { Category, Subcategory } from '../types';
 import { formatMoney } from '../lib/format';
+import { getCategoryIcon as getCategoryIconDef } from '../lib/icons';
 
 interface SidebarProps {
   categories: Category[];
@@ -28,13 +29,20 @@ interface SidebarProps {
   onDeleteSubcategory: (id: number) => void;
 }
 
-function getCategoryIcon(name: string) {
+function getCategoryIcon(name: string, iconKey?: string | null) {
+  if (iconKey) {
+    const def = getCategoryIconDef(iconKey);
+    const I = def.Icon;
+    return <I size={18} style={{ color: def.color }} />;
+  }
   if (name === 'Закуп') return <ShoppingCart size={18} color="#ffffff" />;
   if (name === 'Такси') return <Car size={18} color="#ffffff" />;
   return <Star size={18} color="#ffffff" />;
 }
 
-function getCategoryClass(name: string, isCustom: number): string {
+function getCategoryClass(name: string, isCustom: number, iconKey?: string | null): string {
+  // Свой значок — свой цвет фона, чтобы категории различались
+  if (iconKey) return 'custom';
   if (isCustom === 1) return 'custom';
   if (name === 'Закуп') return 'zakup';
   if (name === 'Такси') return 'taxi';
@@ -74,7 +82,7 @@ export default function Sidebar({
               ? (cat.subcategories as Subcategory[])
               : [];
             const isActive = selectedCategoryId === cat.id;
-            const catClass = getCategoryClass(cat.name, cat.is_custom);
+            const catClass = getCategoryClass(cat.name, cat.is_custom, cat.icon);
 
             return (
               <div key={cat.id}>
@@ -95,8 +103,18 @@ export default function Sidebar({
                   }}
                 >
                   <div className="category-info">
-                    <div className={`category-icon ${catClass}`}>
-                      {getCategoryIcon(cat.name)}
+                    <div
+                      className={`category-icon ${cat.icon ? '' : catClass}`}
+                      style={
+                        cat.icon
+                          ? {
+                              background: `${getCategoryIconDef(cat.icon).color}26`,
+                              boxShadow: `inset 0 0 0 1px ${getCategoryIconDef(cat.icon).color}55`,
+                            }
+                          : undefined
+                      }
+                    >
+                      {getCategoryIcon(cat.name, cat.icon)}
                     </div>
                     <span className="category-name">{cat.name}</span>
                   </div>

@@ -243,6 +243,11 @@ function App() {
     }
   };
 
+  const handleSetIcon = async (id: number, icon: string | null) => {
+    await window.electronAPI.setCategoryIcon(id, icon);
+    await loadCategories();
+  };
+
   const handleAddSubcategory = async (categoryId: number, name: string) => {
     try {
       await window.electronAPI.addSubcategory(categoryId, name);
@@ -418,6 +423,7 @@ function App() {
           onAddSubcategory={handleAddSubcategory}
           onDeleteCategory={(id) => askDelete('category', id)}
           onDeleteSubcategory={(id) => askDelete('subcategory', id)}
+          onSetIcon={handleSetIcon}
         />
       )}
 
