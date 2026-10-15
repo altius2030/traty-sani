@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Траты Сани
 
 Настольное приложение для Windows (Electron + React + SQLite) для учёта расходов, внесений, остатка денег и формирования отчётов за период.
@@ -125,6 +124,3 @@ npm run build:mac          # сборка .dmg для macOS (arm64) — толь
 - Vite — сборка
 - electron-builder — установщики NSIS (Windows) и DMG (macOS)
 - GitHub Actions — сборка macOS-версии в облаке
-=======
-# traty-sani
->>>>>>> origin/main
