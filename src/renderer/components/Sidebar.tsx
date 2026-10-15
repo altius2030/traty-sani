@@ -9,7 +9,7 @@ import {
   Wallet,
   Save,
 } from 'lucide-react';
-import type { Category, Subcategory } from '../types';
+import type { Category, Subcategory, Subitem } from '../types';
 import { formatMoney } from '../lib/format';
 import { getCategoryIcon as getCategoryIconDef } from '../lib/icons';
 
@@ -17,11 +17,14 @@ interface SidebarProps {
   categories: Category[];
   selectedCategoryId: number | null;
   selectedSubcategoryId: number | null;
+  selectedSubitemId: number | null;
   currentBalance: number;
   baseCheckpoint: { amount: number; date: string | null };
   onSelectCategory: (categoryId: number) => void;
   onSelectSubcategory: (subcategoryId: number) => void;
-  onAddExpense: (categoryId: number, subcategoryId?: number) => void;
+  onSelectSubitem: (subitemId: number) => void;
+  onAddExpense: (categoryId: number, subcategoryId?: number, subitemId?: number) => void;
+  onDeleteSubitem: (id: number) => void;
   onOpenCategoryManager: () => void;
   onOpenBalance: () => void;
   onMakeBackup: () => void;
@@ -53,11 +56,14 @@ export default function Sidebar({
   categories,
   selectedCategoryId,
   selectedSubcategoryId,
+  selectedSubitemId,
   currentBalance,
   baseCheckpoint,
   onSelectCategory,
   onSelectSubcategory,
+  onSelectSubitem,
   onAddExpense,
+  onDeleteSubitem,
   onOpenCategoryManager,
   onOpenBalance,
   onMakeBackup,
@@ -144,40 +150,90 @@ export default function Sidebar({
 
                 {isExpanded(cat.id) && subs.length > 0 && (
                   <div className="subcategory-list">
-                    {subs.map((sub) => (
+                    {subs.map((sub) => {
+                      const items: Subitem[] = Array.isArray(sub.items)
+                        ? (sub.items as Subitem[])
+                        : [];
+                      return (
                       <div
                         key={sub.id}
-                        className={`subcategory-item ${
-                          selectedSubcategoryId === sub.id ? 'selected' : ''
-                        }`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectSubcategory(sub.id);
-                          onAddExpense(cat.id, sub.id);
-                        }}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            onSelectSubcategory(sub.id);
-                            onAddExpense(cat.id, sub.id);
-                          }
-                        }}
+                        className="subcategory-node"
                       >
-                        <span>{sub.name}</span>
-                        <button
-                          className="action-btn"
+                        <div
+                          className={`subcategory-item ${
+                            selectedSubcategoryId === sub.id ? 'selected' : ''
+                          }`}
                           onClick={(e) => {
                             e.stopPropagation();
-                            onDeleteSubcategory(sub.id);
+                            onSelectSubcategory(sub.id);
+                            onAddExpense(cat.id, sub.id);
                           }}
-                          title="Удалить подкатегорию"
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              onSelectSubcategory(sub.id);
+                              onAddExpense(cat.id, sub.id);
+                            }
+                          }}
                         >
-                          <Trash2 size={13} color="var(--accent-danger)" />
-                        </button>
+                          <span>{sub.name}</span>
+                          <button
+                            className="action-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteSubcategory(sub.id);
+                            }}
+                            title="Удалить подкатегорию"
+                          >
+                            <Trash2 size={13} color="var(--accent-danger)" />
+                          </button>
+                        </div>
+
+                        {/* Третий уровень — статьи */}
+                        {items.length > 0 && (
+                          <div className="subitem-list">
+                            {items.map((item) => (
+                              <div
+                                key={item.id}
+                                className={`subcategory-item subitem-item ${
+                                  selectedSubitemId === item.id ? 'selected' : ''
+                                }`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onSelectSubcategory(sub.id);
+                                  onSelectSubitem(item.id);
+                                  onAddExpense(cat.id, sub.id, item.id);
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    onSelectSubitem(item.id);
+                                    onAddExpense(cat.id, sub.id, item.id);
+                                  }
+                                }}
+                              >
+                                <span>{item.name}</span>
+                                <button
+                                  className="action-btn"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteSubitem(item.id);
+                                  }}
+                                  title="Удалить статью"
+                                >
+                                  <Trash2 size={11} color="var(--accent-danger)" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

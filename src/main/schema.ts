@@ -14,7 +14,8 @@ export const SCHEMA_SQL = `
     type TEXT NOT NULL DEFAULT 'expense',
     is_custom INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
-    icon TEXT
+    icon TEXT,
+    color TEXT
   );
 
   CREATE TABLE IF NOT EXISTS subcategories (
@@ -26,6 +27,18 @@ export const SCHEMA_SQL = `
     FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
   );
 
+  -- Третий уровень: статья внутри подкатегории.
+  -- Вынесена в отдельную таблицу (а не parent_id в subcategories), чтобы
+  -- существующие запросы второго уровня продолжили работать без изменений.
+  CREATE TABLE IF NOT EXISTS subitems (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subcategory_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    is_custom INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (subcategory_id) REFERENCES subcategories(id) ON DELETE CASCADE
+  );
+
   CREATE TABLE IF NOT EXISTS expenses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category_id INTEGER NOT NULL,
@@ -34,8 +47,10 @@ export const SCHEMA_SQL = `
     date TEXT NOT NULL,
     note TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    subitem_id INTEGER,
     FOREIGN KEY (category_id) REFERENCES categories(id),
-    FOREIGN KEY (subcategory_id) REFERENCES subcategories(id)
+    FOREIGN KEY (subcategory_id) REFERENCES subcategories(id),
+    FOREIGN KEY (subitem_id) REFERENCES subitems(id)
   );
 
   CREATE TABLE IF NOT EXISTS balance_history (
@@ -77,6 +92,37 @@ export const DEFAULT_CATEGORIES: { name: string; type: string; sortOrder: number
 export const DEFAULT_CATEGORY_ICONS: Record<string, string> = {
   Закуп: 'cart',
   Такси: 'car',
+};
+
+/**
+ * Цвета для кольцевой диаграммы. Подобраны так, чтобы соседние сектора
+ * различались и при большом числе категорий: контраст по светлоте, а не
+ * только по тону. Розовый и голубой разведены по краям круга.
+ */
+export const CATEGORY_COLORS: string[] = [
+  '#00d4aa', // бирюзовый
+  '#ff6b6b', // коралловый
+  '#ffd166', // янтарный
+  '#4cc9f0', // небесный
+  '#c77dff', // сиреневый
+  '#06d6a0', // изумрудный
+  '#ef476f', // малиновый
+  '#118ab2', // лазурный
+  '#f4a261', // песочный
+  '#8ecae6', // небесно-голубой
+  '#b56576', // сливовый
+  '#52b788', // зелёный
+  '#e76f51', // терракотовый
+  '#4361ee', // кобальт
+  '#f72585', // фуксия
+  '#3a86ff', // синий
+  '#8338ec', // фиолетовый
+  '#ffbe0b', // золотой
+];
+
+export const DEFAULT_CATEGORY_COLORS: Record<string, string> = {
+  Закуп: CATEGORY_COLORS[0],
+  Такси: CATEGORY_COLORS[1],
 };
 
 export const ZAKUP_SUBCATEGORIES = [
@@ -149,12 +195,43 @@ export function applySchema(database: Database): void {
     console.log('[schema] Добавлена колонка categories.icon');
   }
 
-  // Встроенным категориям назначаем значки по умолчанию
+  // Миграция 1.0.7: свой цвет категории (для графиков) и третий уровень.
+  if (!columns.some((c) => c.name === 'color')) {
+    database.exec(`ALTER TABLE categories ADD COLUMN color TEXT`);
+    console.log('[schema] Добавлена колонка categories.color');
+  }
+  const expenseCols = database.prepare('PRAGMA table_info(expenses)').all() as {
+    name: string;
+  }[];
+  if (!expenseCols.some((c) => c.name === 'subitem_id')) {
+    database.exec(`ALTER TABLE expenses ADD COLUMN subitem_id INTEGER`);
+    console.log('[schema] Добавлена колонка expenses.subitem_id');
+  }
+
+  // Третий уровень уникален внутри подкатегории — иначе повторный запуск
+  // продублирует статьи так же, как когда-то дублировались подкатегории.
+  database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_subitems_unique
+      ON subitems(subcategory_id, name);
+  `);
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_subitems_parent
+      ON subitems(subcategory_id);
+  `);
+
+  // Встроенным категориям назначаем значки и цвета по умолчанию
   const assignIcon = database.prepare(
     `UPDATE categories SET icon = ? WHERE name = ? AND (icon IS NULL OR icon = '')`
   );
   for (const [name, icon] of Object.entries(DEFAULT_CATEGORY_ICONS)) {
     assignIcon.run(icon, name);
+  }
+
+  const assignColor = database.prepare(
+    `UPDATE categories SET color = ? WHERE name = ? AND (color IS NULL OR color = '')`
+  );
+  for (const [name, color] of Object.entries(DEFAULT_CATEGORY_COLORS)) {
+    assignColor.run(color, name);
   }
 
   const insertCategory = database.prepare(

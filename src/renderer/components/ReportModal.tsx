@@ -184,36 +184,61 @@ export default function ReportModal({ period, onClose, onExport }: ReportModalPr
 
             {report.expenses.length > 0 && (
                   <div className="report-breakdown">
-                <div className="breakdown-title">Расходы по категориям</div>
-                <table className="breakdown-table">
-                  <thead>
-                    <tr>
-                      <th>Категория / Подкатегория</th>
-                      <th style={{ textAlign: 'right', width: 160 }}>Сумма</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(report.byCategory).map(([catName, data]) => (
-                      <Fragment key={catName}>
+                    <div className="breakdown-title">Расходы по категориям</div>
+                    <table className="breakdown-table">
+                      <thead>
                         <tr>
-                          <td className="breakdown-category">{catName}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                            {formatMoney(data.total)}
-                          </td>
+                          <th>Категория / Подкатегория / Статья</th>
+                          <th style={{ textAlign: 'right', width: 160 }}>Сумма</th>
                         </tr>
-                        {Object.entries(data.subcategories).map(([subName, subTotal]) => (
-                          <tr key={`${catName}-${subName}`}>
-                            <td className="breakdown-subcategory">└ {subName}</td>
-                            <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
-                              {formatMoney(subTotal)}
-                            </td>
-                          </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(report.byCategory).map(([catName, data]) => (
+                          <Fragment key={catName}>
+                            <tr>
+                              <td className="breakdown-category">
+                                <span
+                                  className="chart-legend-dot"
+                                  style={{
+                                    background: data.color || 'var(--accent-primary)',
+                                    display: 'inline-block',
+                                    marginRight: 8,
+                                  }}
+                                />
+                                {catName}
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                                {formatMoney(data.total)}
+                              </td>
+                            </tr>
+                            {Object.entries(data.subcategories).map(([subName, sub]) => (
+                              <Fragment key={`${catName}-${subName}`}>
+                                <tr>
+                                  <td className="breakdown-subcategory">└ {subName}</td>
+                                  <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
+                                    {formatMoney(sub.total)}
+                                  </td>
+                                </tr>
+                                {Object.entries(sub.items).map(([itemName, itemTotal]) => (
+                                  <tr key={`${catName}-${subName}-${itemName}`}>
+                                    <td className="breakdown-item">└─ {itemName}</td>
+                                    <td
+                                      style={{
+                                        textAlign: 'right',
+                                        color: 'var(--text-muted)',
+                                      }}
+                                    >
+                                      {formatMoney(itemTotal)}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </Fragment>
+                            ))}
+                          </Fragment>
                         ))}
-                      </Fragment>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                      </tbody>
+                    </table>
+                  </div>
                 )}
 
                 {report.deposits.length > 0 && (

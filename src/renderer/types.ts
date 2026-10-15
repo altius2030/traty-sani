@@ -1,8 +1,17 @@
+export interface Subitem {
+  id: number;
+  name: string;
+  is_custom: number;
+  sort_order: number;
+}
+
 export interface Subcategory {
   id: number;
   name: string;
   is_custom: number;
   sort_order: number;
+  /** Третий уровень — статьи внутри подкатегории */
+  items?: Subitem[] | string | null;
 }
 
 export interface Category {
@@ -13,6 +22,8 @@ export interface Category {
   sort_order: number;
   /** Ключ значка из набора в lib/icons.ts */
   icon?: string | null;
+  /** Цвет категории — используется на графиках */
+  color?: string | null;
   subcategories?: Subcategory[] | string | null;
 }
 
@@ -25,7 +36,9 @@ export interface Expense {
   note: string | null;
   category_name: string;
   category_icon?: string | null;
+  category_color?: string | null;
   subcategory_name: string | null;
+  subitem_name?: string | null;
 }
 
 export interface BalanceRecord {
@@ -46,7 +59,9 @@ export interface Deposit {
 
 export interface CategoryBreakdown {
   total: number;
-  subcategories: Record<string, number>;
+  /** Цвет категории, выбранный пользователем */
+  color: string | null;
+  subcategories: Record<string, { total: number; items: Record<string, number> }>;
 }
 
 export interface Report {

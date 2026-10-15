@@ -29,14 +29,22 @@ import {
 
 /** Текст подтверждения удаления: прямо говорим, сколько трат пропадёт */
 function buildDeleteMessage(
-  kind: 'category' | 'subcategory',
-  impact?: { expenses: number; subcategories: number }
+  kind: 'category' | 'subcategory' | 'subitem',
+  impact?: { expenses: number; subcategories: number; subitems?: number }
 ): string {
-  const noun = kind === 'category' ? 'эту категорию' : 'эту подкатегорию';
+  const noun =
+    kind === 'category'
+      ? 'эту категорию'
+      : kind === 'subcategory'
+      ? 'эту подкатегорию'
+      : 'эту статью';
   const parts: string[] = [];
 
   if (impact && impact.subcategories > 0) {
     parts.push(`${impact.subcategories} подкатегорий`);
+  }
+  if (impact && impact.subitems && impact.subitems > 0) {
+    parts.push(`${impact.subitems} статей`);
   }
   if (impact && impact.expenses > 0) {
     parts.push(`${impact.expenses} трат`);
@@ -61,10 +69,11 @@ function App() {
   const [activeTab, setActiveTab] = useState<MainTab>('expenses');
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<number | null>(null);
+  const [selectedSubitemId, setSelectedSubitemId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [modal, setModal] = useState<
-    | { type: 'expense'; categoryId?: number; subcategoryId?: number }
+    | { type: 'expense'; categoryId?: number; subcategoryId?: number; subitemId?: number }
     | { type: 'deposit' }
     | { type: 'balance' }
     | { type: 'categories' }
@@ -73,9 +82,9 @@ function App() {
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<
     | {
-        kind: 'expense' | 'deposit' | 'category' | 'subcategory';
+        kind: 'expense' | 'deposit' | 'category' | 'subcategory' | 'subitem';
         id: number;
-        impact?: { expenses: number; subcategories: number };
+        impact?: { expenses: number; subcategories: number; subitems?: number };
       }
     | null
   >(null);
@@ -158,6 +167,7 @@ function App() {
   const handleAddExpense = async (data: {
     categoryId: number;
     subcategoryId?: number;
+    subitemId?: number;
     amount: number;
     date: string;
     note?: string;
@@ -223,6 +233,10 @@ function App() {
       await window.electronAPI.deleteSubcategory(id);
       addToast('Подкатегория удалена', 'info');
       await loadCategories();
+    } else if (kind === 'subitem') {
+      await window.electronAPI.deleteSubitem(id);
+      addToast('Статья удалена', 'info');
+      await loadCategories();
     }
   };
 
@@ -248,6 +262,25 @@ function App() {
     await loadCategories();
   };
 
+  const handleSetColor = async (id: number, color: string | null) => {
+    await window.electronAPI.setCategoryColor(id, color);
+    await loadCategories();
+  };
+
+  const handleAddSubitem = async (subcategoryId: number, name: string) => {
+    try {
+      await window.electronAPI.addSubitem(subcategoryId, name);
+      await loadCategories();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Не удалось добавить статью', 'error');
+    }
+  };
+
+  const askDeleteSubitem = async (id: number) => {
+    const impact = await window.electronAPI.getDeleteImpact('subitem', id);
+    setConfirmDelete({ kind: 'subitem', id, impact });
+  };
+
   const handleAddSubcategory = async (categoryId: number, name: string) => {
     try {
       await window.electronAPI.addSubcategory(categoryId, name);
@@ -270,6 +303,7 @@ function App() {
   const handleSelectCategory = (id: number) => {
     setSelectedCategoryId(id);
     setSelectedSubcategoryId(null);
+    setSelectedSubitemId(null);
   };
 
   const handleSelectSubcategory = (id: number) => {
@@ -305,21 +339,25 @@ function App() {
     }
     lines.push('');
     lines.push('Расходы по категориям:');
-    lines.push('Категория;Подкатегория;Сумма');
+    lines.push('Категория;Подкатегория;Статья;Сумма');
     for (const [cat, data] of Object.entries(rep.byCategory)) {
       lines.push(`${cat};;${data.total.toFixed(2)}`);
-      for (const [sub, subTotal] of Object.entries(data.subcategories)) {
-        lines.push(`${cat};${sub};${subTotal.toFixed(2)}`);
+      for (const [sub, subData] of Object.entries(data.subcategories)) {
+        lines.push(`${cat};${sub};${subData.total.toFixed(2)}`);
+        for (const [item, itemTotal] of Object.entries(subData.items)) {
+          lines.push(`${cat};${sub};${item};${itemTotal.toFixed(2)}`);
+        }
       }
     }
     lines.push('');
     lines.push('Детальный список трат:');
-    lines.push('Дата;Категория;Подкатегория;Сумма;Комментарий');
+    lines.push('Дата;Категория;Подкатегория;Статья;Сумма;Комментарий');
     for (const exp of rep.expenses) {
       const cat = exp.category_name.replace(/;/g, ',');
       const sub = (exp.subcategory_name || '').replace(/;/g, ',');
+      const item = (exp.subitem_name || '').replace(/;/g, ',');
       const note = (exp.note || '').replace(/;/g, ',');
-      lines.push(`${exp.date};${cat};${sub};${exp.amount.toFixed(2)};${note}`);
+      lines.push(`${exp.date};${cat};${sub};${item};${exp.amount.toFixed(2)};${note}`);
     }
 
     // Данные, на которых построены графики, — отдельными секциями
@@ -362,12 +400,15 @@ function App() {
           categories={categories}
           selectedCategoryId={selectedCategoryId}
           selectedSubcategoryId={selectedSubcategoryId}
+          selectedSubitemId={selectedSubitemId}
           currentBalance={currentBalance}
           baseCheckpoint={baseCheckpoint}
           onSelectCategory={handleSelectCategory}
           onSelectSubcategory={handleSelectSubcategory}
-          onAddExpense={(categoryId, subcategoryId) =>
-            setModal({ type: 'expense', categoryId, subcategoryId })
+          onSelectSubitem={setSelectedSubitemId}
+          onDeleteSubitem={askDeleteSubitem}
+          onAddExpense={(categoryId, subcategoryId, subitemId) =>
+            setModal({ type: 'expense', categoryId, subcategoryId, subitemId })
           }
           onOpenCategoryManager={() => setModal({ type: 'categories' })}
           onOpenBalance={() => setModal({ type: 'balance' })}
@@ -402,6 +443,7 @@ function App() {
           categories={categories}
           preselectedCategoryId={modal.categoryId}
           preselectedSubcategoryId={modal.subcategoryId}
+          preselectedSubitemId={modal.subitemId}
           onClose={() => setModal(null)}
           onSubmit={handleAddExpense}
         />
@@ -424,6 +466,9 @@ function App() {
           onDeleteCategory={(id) => askDelete('category', id)}
           onDeleteSubcategory={(id) => askDelete('subcategory', id)}
           onSetIcon={handleSetIcon}
+          onSetColor={handleSetColor}
+          onAddSubitem={handleAddSubitem}
+          onDeleteSubitem={askDeleteSubitem}
         />
       )}
 
@@ -441,7 +486,9 @@ function App() {
               ? 'Вы уверены, что хотите удалить это внесение?'
               : confirmDelete.kind === 'category'
               ? buildDeleteMessage('category', confirmDelete.impact)
-              : buildDeleteMessage('subcategory', confirmDelete.impact)
+              : confirmDelete.kind === 'subcategory'
+              ? buildDeleteMessage('subcategory', confirmDelete.impact)
+              : buildDeleteMessage('subitem', confirmDelete.impact)
           }
           confirmText="Удалить"
           danger

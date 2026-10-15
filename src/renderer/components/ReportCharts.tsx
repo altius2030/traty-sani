@@ -1,34 +1,24 @@
 import type { Report } from '../types';
 import { formatMoney } from '../lib/format';
-import { getCategoryColor } from '../lib/icons';
+import { pickChartColor } from '../lib/icons';
 
 /**
  * Графики для отчёта. Сделаны на голом SVG, без внешних библиотек:
  * приложение работает офлайн, а лишние зависимости увеличивают сборку.
  */
 
-const PALETTE = [
-  '#00d4aa',
-  '#00a3e0',
-  '#a855f7',
-  '#ffb800',
-  '#ff6b6b',
-  '#4ecdc4',
-  '#ff9f43',
-  '#5f27cd',
-  '#c8d6e5',
-];
-
 interface Slice {
   label: string;
   value: number;
   color: string;
+  chosen?: string | null;
 }
 
 /** Кольцевая диаграмма расходов по категориям */
 function DonutChart({ data, total }: { data: Slice[]; total: number }) {
   const size = 200;
   const stroke = 34;
+  const gap = 2; // зазор между секторами в единицах длины дуги
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
 
@@ -46,7 +36,10 @@ function DonutChart({ data, total }: { data: Slice[]; total: number }) {
         <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
           {data.map((slice) => {
             const fraction = slice.value / total;
-            const length = fraction * circumference;
+            const full = fraction * circumference;
+            // У коротких секторов зазор не съел бы всю дугу
+            const gapHere = data.length > 1 ? Math.min(gap, full * 0.4) : 0;
+            const length = Math.max(full - gapHere, 0.5);
             const dash = `${length} ${circumference - length}`;
             const el = (
               <circle
@@ -58,11 +51,11 @@ function DonutChart({ data, total }: { data: Slice[]; total: number }) {
                 stroke={slice.color}
                 strokeWidth={stroke}
                 strokeDasharray={dash}
-                strokeDashoffset={-offset}
+                strokeDashoffset={-(offset + gapHere / 2)}
                 strokeLinecap="butt"
               />
             );
-            offset += length;
+            offset += full;
             return el;
           })}
         </g>
@@ -85,6 +78,9 @@ function DonutChart({ data, total }: { data: Slice[]; total: number }) {
             <span className="chart-legend-dot" style={{ background: slice.color }} />
             <span className="chart-legend-label" title={slice.label}>
               {slice.label}
+            </span>
+            <span className="chart-legend-pct">
+              {total > 0 ? ((slice.value / total) * 100).toFixed(1) : '0.0'}%
             </span>
             <span className="chart-legend-value">{formatMoney(slice.value)}</span>
           </div>
@@ -128,23 +124,13 @@ function BarChart({ data }: { data: { label: string; expense: number; deposit: n
 }
 
 export default function ReportCharts({ report }: { report: Report }) {
-  // Цвет берём из значка категории, чтобы кольцо совпадало с боковой панелью
-  const iconByCategory = new Map<string, string | null>();
-  for (const e of report.expenses) {
-    if (!iconByCategory.has(e.category_name)) {
-      iconByCategory.set(e.category_name, e.category_icon ?? null);
-    }
-  }
-
+  // Цвет — тот, что пользователь выбрал для категории; если не выбран,
+  // берём из палитры по позиции. Плюс рисуем разделительную тёмную линию,
+  // иначе соседние сектора с похожим тоном визуально сливаются.
   const slices: Slice[] = Object.entries(report.byCategory)
-    .map(([label, v]) => ({ label, value: v.total, color: '' }))
+    .map(([label, v]) => ({ label, value: v.total, color: '', chosen: v.color }))
     .sort((a, b) => b.value - a.value)
-    .map((s, i) => ({
-      ...s,
-      color: iconByCategory.has(s.label)
-        ? getCategoryColor(iconByCategory.get(s.label))
-        : PALETTE[i % PALETTE.length],
-    }));
+    .map((s, i) => ({ ...s, color: pickChartColor(i, s.chosen) }));
 
   const total = slices.reduce((s, x) => s + x.value, 0);
 

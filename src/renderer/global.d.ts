@@ -8,14 +8,17 @@ export interface ElectronAPI {
     name: string
   ): Promise<{ id: number; name: string; is_custom: number }>;
   setCategoryIcon(id: number, icon: string | null): Promise<{ success: boolean }>;
+  setCategoryColor(id: number, color: string | null): Promise<{ success: boolean }>;
+  addSubitem(subcategoryId: number, name: string): Promise<any>;
+  deleteSubitem(id: number): Promise<{ success: boolean }>;
   deleteCategory(id: number): Promise<{ success: boolean }>;
   deleteSubcategory(id: number): Promise<{ success: boolean }>;
   makeBackup(): Promise<{ path: string }>;
   getBackups(): Promise<{ name: string; path: string; size: number }[]>;
   getDeleteImpact(
-    kind: 'category' | 'subcategory',
+    kind: 'category' | 'subcategory' | 'subitem',
     id: number
-  ): Promise<{ expenses: number; subcategories: number }>;
+  ): Promise<{ expenses: number; subcategories: number; subitems: number }>;
   getExpenses(startDate: string, endDate: string): Promise<any[]>;
   addExpense(expense: {
     categoryId: number;

@@ -365,6 +365,32 @@ input::placeholder {
   font-weight: 500;
 }
 
+/* Третий уровень — статьи внутри подкатегории */
+.subcategory-node {
+  display: flex;
+  flex-direction: column;
+}
+
+.subitem-list {
+  margin-left: 14px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.subitem-item {
+  font-size: 12px;
+  padding: 6px 10px;
+  color: var(--text-muted);
+}
+
+.subitem-item.selected {
+  background: rgba(0, 212, 170, 0.12);
+}
+
 .add-btn {
   width: 100%;
   display: flex;
@@ -1006,6 +1032,45 @@ input::placeholder {
   flex-shrink: 0;
 }
 
+.chart-legend-pct {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  min-width: 38px;
+  text-align: right;
+}
+
+/* ——— Выбор цвета категории ——— */
+.color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.color-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: 2px solid transparent;
+  transition: var(--transition);
+}
+
+.color-swatch:hover {
+  transform: scale(1.12);
+}
+
+.color-swatch.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--accent-primary);
+}
+
+.color-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
 .chart-bars {
   display: flex;
   align-items: flex-end;
@@ -1138,6 +1203,13 @@ input::placeholder {
 .breakdown-subcategory {
   padding-left: 24px;
   color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* Третий уровень — статья */
+.breakdown-item {
+  padding-left: 40px;
+  color: var(--text-muted);
   font-size: 12px;
 }
 

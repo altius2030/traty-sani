@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addCategory: (name: string) => ipcRenderer.invoke('db:addCategory', name),
   addSubcategory: (categoryId: number, name: string) => ipcRenderer.invoke('db:addSubcategory', categoryId, name),
   setCategoryIcon: (id: number, icon: string | null) => ipcRenderer.invoke('db:setCategoryIcon', id, icon),
+  setCategoryColor: (id: number, color: string | null) => ipcRenderer.invoke('db:setCategoryColor', id, color),
+  addSubitem: (subcategoryId: number, name: string) => ipcRenderer.invoke('db:addSubitem', subcategoryId, name),
+  deleteSubitem: (id: number) => ipcRenderer.invoke('db:deleteSubitem', id),
   deleteCategory: (id: number) => ipcRenderer.invoke('db:deleteCategory', id),
   deleteSubcategory: (id: number) => ipcRenderer.invoke('db:deleteSubcategory', id),
 

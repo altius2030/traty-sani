@@ -128,3 +128,49 @@ export function getCategoryIcon(key?: string | null): CategoryIconDef {
 export function getCategoryColor(key?: string | null): string {
   return getCategoryIcon(key).color;
 }
+
+/**
+ * Палитра для секторов кольцевой диаграммы.
+ * Подобрана по светлоте, а не только по тону: соседние цвета заметно
+ * отличаются, поэтому сектора не сливаются даже при десяти категориях.
+ * Порядок совпадает с CATEGORY_COLORS в схеме БД — дефолтные цвета
+ * встроенных категорий берутся оттуда.
+ */
+export const CHART_COLORS = [
+  '#00d4aa',
+  '#ff6b6b',
+  '#ffd166',
+  '#4cc9f0',
+  '#c77dff',
+  '#06d6a0',
+  '#ef476f',
+  '#118ab2',
+  '#f4a261',
+  '#8ecae6',
+  '#b56576',
+  '#52b788',
+  '#e76f51',
+  '#4361ee',
+  '#f72585',
+  '#3a86ff',
+  '#8338ec',
+  '#ffbe0b',
+];
+
+/** Нормализация HEX в верхний регистр; мусорные значения отбрасываются */
+export function normalizeColor(value?: string | null): string | null {
+  if (!value) return null;
+  const v = value.trim().toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(v) ? v : null;
+}
+
+/**
+ * Цвет категории для диаграммы: сначала явно выбранный пользователем,
+ * иначе — по позиции в палитре.
+ */
+export function pickChartColor(
+  index: number,
+  chosen?: string | null
+): string {
+  return normalizeColor(chosen) || CHART_COLORS[index % CHART_COLORS.length];
+}

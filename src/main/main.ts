@@ -196,7 +196,16 @@ app.on('before-quit', () => {
 ipcMain.handle('db:getCategories', () => {
   return db!.prepare(`
     SELECT c.*,
-      (SELECT json_group_array(json_object('id', s.id, 'name', s.name, 'is_custom', s.is_custom, 'sort_order', s.sort_order))
+      (SELECT json_group_array(json_object(
+                'id', s.id,
+                'name', s.name,
+                'is_custom', s.is_custom,
+                'sort_order', s.sort_order,
+                'items', (
+                  SELECT json_group_array(json_object(
+                             'id', si.id, 'name', si.name,
+                             'is_custom', si.is_custom, 'sort_order', si.sort_order))
+                  FROM (SELECT * FROM subitems WHERE subcategory_id = s.id ORDER BY sort_order) si)))
        FROM (SELECT * FROM subcategories WHERE category_id = c.id ORDER BY sort_order) s) as subcategories
     FROM categories c
     WHERE c.type = 'expense'
@@ -230,6 +239,34 @@ ipcMain.handle('db:setCategoryIcon', (_, id: number, icon: string | null) => {
   return { success: true };
 });
 
+/** Смена цвета категории — этот цвет используется на графиках */
+ipcMain.handle('db:setCategoryColor', (_, id: number, color: string | null) => {
+  const clean = color && typeof color === 'string' ? color.trim() : null;
+  db!.prepare('UPDATE categories SET color = ? WHERE id = ?').run(clean || null, id);
+  return { success: true };
+});
+
+// ——— Третий уровень (статьи) ———
+ipcMain.handle('db:addSubitem', (_, subcategoryId: number, name: string) => {
+  const clean = (name || '').trim();
+  if (!clean) throw new Error('Название статьи не может быть пустым');
+  const stmt = db!.prepare(
+    `INSERT OR IGNORE INTO subitems (subcategory_id, name, is_custom, sort_order)
+     VALUES (?, ?, 1, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM subitems WHERE subcategory_id = ?))`
+  );
+  const result = stmt.run(subcategoryId, clean, subcategoryId);
+  return { id: result.lastInsertRowid, name: clean, is_custom: 1 };
+});
+
+ipcMain.handle('db:deleteSubitem', (_, id: number) => {
+  const run = db!.transaction((itemId: number) => {
+    db!.prepare('DELETE FROM expenses WHERE subitem_id = ?').run(itemId);
+    db!.prepare('DELETE FROM subitems WHERE id = ?').run(itemId);
+  });
+  run(id);
+  return { success: true };
+});
+
 // ——— Резервные копии ———
 ipcMain.handle('db:makeBackup', () => {
   const dbPath = getDbPath();
@@ -257,17 +294,39 @@ ipcMain.handle('db:getBackups', () => {
  * Сколько трат и подкатегорий будет затронуто удалением.
  * Интерфейс показывает это в подтверждении, чтобы удаление не было сюрпризом.
  */
-ipcMain.handle('db:getDeleteImpact', (_, kind: 'category' | 'subcategory', id: number) => {
-  if (kind === 'category') {
-    const expenses = db!.prepare('SELECT COUNT(*) c FROM expenses WHERE category_id = ?').get(id) as { c: number };
-    const subs = db!.prepare('SELECT COUNT(*) c FROM subcategories WHERE category_id = ?').get(id) as { c: number };
-    return { expenses: expenses.c, subcategories: subs.c };
+ipcMain.handle(
+  'db:getDeleteImpact',
+  (_, kind: 'category' | 'subcategory' | 'subitem', id: number) => {
+    if (kind === 'category') {
+      const expenses = db!.prepare('SELECT COUNT(*) c FROM expenses WHERE category_id = ?').get(id) as {
+        c: number;
+      };
+      const subs = db!.prepare('SELECT COUNT(*) c FROM subcategories WHERE category_id = ?').get(id) as {
+        c: number;
+      };
+      const items = db!.prepare(
+        `SELECT COUNT(*) c FROM subitems
+         WHERE subcategory_id IN (SELECT id FROM subcategories WHERE category_id = ?)`
+      ).get(id) as { c: number };
+      return { expenses: expenses.c, subcategories: subs.c, subitems: items.c };
+    }
+    if (kind === 'subitem') {
+      const expenses = db!.prepare('SELECT COUNT(*) c FROM expenses WHERE subitem_id = ?').get(id) as {
+        c: number;
+      };
+      return { expenses: expenses.c, subcategories: 0, subitems: 0 };
+    }
+    const expenses = db!.prepare(
+      `SELECT COUNT(*) c FROM expenses
+       WHERE subcategory_id = ?
+          OR subitem_id IN (SELECT id FROM subitems WHERE subcategory_id = ?)`
+    ).get(id, id) as { c: number };
+    const items = db!.prepare('SELECT COUNT(*) c FROM subitems WHERE subcategory_id = ?').get(id) as {
+      c: number;
+    };
+    return { expenses: expenses.c, subcategories: 0, subitems: items.c };
   }
-  const expenses = db!.prepare('SELECT COUNT(*) c FROM expenses WHERE subcategory_id = ?').get(id) as {
-    c: number;
-  };
-  return { expenses: expenses.c, subcategories: 0 };
-});
+);
 
 /**
  * Удаление категории. Разрешено и для встроенных («Закуп», «Такси») —
@@ -290,6 +349,12 @@ ipcMain.handle('db:deleteCategory', (_, id: number) => {
       ).run(`deleted_default:${name}`);
     }
     db!.prepare('DELETE FROM expenses WHERE category_id = ?').run(categoryId);
+    db!.prepare(
+      `DELETE FROM expenses WHERE subcategory_id IN (SELECT id FROM subcategories WHERE category_id = ?)`
+    ).run(categoryId);
+    db!.prepare(
+      `DELETE FROM subitems WHERE subcategory_id IN (SELECT id FROM subcategories WHERE category_id = ?)`
+    ).run(categoryId);
     db!.prepare('DELETE FROM subcategories WHERE category_id = ?').run(categoryId);
     db!.prepare('DELETE FROM categories WHERE id = ?').run(categoryId);
   });
@@ -314,7 +379,11 @@ ipcMain.handle('db:deleteSubcategory', (_, id: number) => {
         `INSERT OR REPLACE INTO settings (key, value) VALUES (?, datetime('now'))`
       ).run(`deleted_sub:${row.category_name}:${row.name}`);
     }
+    db!.prepare(
+      `DELETE FROM expenses WHERE subitem_id IN (SELECT id FROM subitems WHERE subcategory_id = ?)`
+    ).run(subId);
     db!.prepare('DELETE FROM expenses WHERE subcategory_id = ?').run(subId);
+    db!.prepare('DELETE FROM subitems WHERE subcategory_id = ?').run(subId);
     db!.prepare('DELETE FROM subcategories WHERE id = ?').run(subId);
   });
   run(id);
@@ -323,18 +392,27 @@ ipcMain.handle('db:deleteSubcategory', (_, id: number) => {
 
 ipcMain.handle('db:getExpenses', (_, { startDate, endDate }: { startDate: string; endDate: string }) => {
   return db!.prepare(`
-    SELECT e.*, c.name as category_name, c.icon as category_icon, s.name as subcategory_name
+    SELECT e.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
+           s.name as subcategory_name, si.name as subitem_name
     FROM expenses e
     JOIN categories c ON e.category_id = c.id
     LEFT JOIN subcategories s ON e.subcategory_id = s.id
+    LEFT JOIN subitems si ON e.subitem_id = si.id
     WHERE date(e.date) BETWEEN date(?) AND date(?)
     ORDER BY date(e.date) DESC, e.created_at DESC
   `).all(startDate, endDate);
 });
 
-ipcMain.handle('db:addExpense', (_, expense: { categoryId: number; subcategoryId?: number; amount: number; date: string; note?: string }) => {
-  const stmt = db!.prepare('INSERT INTO expenses (category_id, subcategory_id, amount, date, note) VALUES (?, ?, ?, ?, ?)');
-  const result = stmt.run(expense.categoryId, expense.subcategoryId || null, expense.amount, expense.date, expense.note || null);
+ipcMain.handle('db:addExpense', (_, expense: { categoryId: number; subcategoryId?: number; subitemId?: number; amount: number; date: string; note?: string }) => {
+  const stmt = db!.prepare('INSERT INTO expenses (category_id, subcategory_id, subitem_id, amount, date, note) VALUES (?, ?, ?, ?, ?, ?)');
+  const result = stmt.run(
+    expense.categoryId,
+    expense.subcategoryId || null,
+    expense.subitemId || null,
+    expense.amount,
+    expense.date,
+    expense.note || null
+  );
   return { id: result.lastInsertRowid, ...expense };
 });
 
@@ -479,19 +557,32 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
    OR (date(date) = ? AND created_at > ?)
   ) AND date(date) <= ?`;
 
+  const EXPENSE_SELECT = `
+    SELECT e.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
+           s.name as subcategory_name, si.name as subitem_name
+    FROM expenses e
+    JOIN categories c ON e.category_id = c.id
+    LEFT JOIN subcategories s ON e.subcategory_id = s.id
+    LEFT JOIN subitems si ON e.subitem_id = si.id`;
+
   let startAmount: number;
   let baseCheckpoint: { amount: number; date: string | null };
-  let expenses: Array<{ amount: number; category_name: string; subcategory_name?: string; date: string }>;
+  let expenses: Array<{
+    amount: number;
+    category_name: string;
+    category_icon?: string | null;
+    category_color?: string | null;
+    subcategory_name?: string | null;
+    subitem_name?: string | null;
+    date: string;
+  }>;
   let deposits: Array<{ amount: number; date: string; note: string }>;
 
   if (cpInPeriod) {
     startAmount = cpInPeriod.amount;
     baseCheckpoint = { amount: cpInPeriod.amount, date: cpInPeriod.d };
     expenses = db!.prepare(
-      `SELECT e.*, c.name as category_name, s.name as subcategory_name
-       FROM expenses e
-       JOIN categories c ON e.category_id = c.id
-       LEFT JOIN subcategories s ON e.subcategory_id = s.id
+      `${EXPENSE_SELECT}
        WHERE ${AFTER_CP}
        ORDER BY date(e.date) DESC`
     ).all(cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate) as typeof expenses;
@@ -504,10 +595,7 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     startAmount = start.balance;
     baseCheckpoint = { amount: start.base, date: start.baseDate };
     expenses = db!.prepare(
-      `SELECT e.*, c.name as category_name, s.name as subcategory_name
-       FROM expenses e
-       JOIN categories c ON e.category_id = c.id
-       LEFT JOIN subcategories s ON e.subcategory_id = s.id
+      `${EXPENSE_SELECT}
        WHERE date(e.date) BETWEEN date(?) AND date(?)
        ORDER BY date(e.date) DESC`
     ).all(startDate, endDate) as typeof expenses;
@@ -524,16 +612,36 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
   const totalDeposits = deposits.reduce((sum, d) => sum + d.amount, 0);
 
+  // Разбивка по трём уровням. Цвет берём из настройки категории — именно
+  // его пользователь выбирает для графика.
   const byCategory = expenses.reduce((acc, e) => {
     const key = e.category_name;
-    if (!acc[key]) acc[key] = { total: 0, subcategories: {} };
+    if (!acc[key]) {
+      acc[key] = { total: 0, color: e.category_color || null, subcategories: {} };
+    }
     acc[key].total += e.amount;
+    if (!acc[key].color && e.category_color) acc[key].color = e.category_color;
+
     if (e.subcategory_name) {
-      if (!acc[key].subcategories[e.subcategory_name]) acc[key].subcategories[e.subcategory_name] = 0;
-      acc[key].subcategories[e.subcategory_name] += e.amount;
+      const sub = acc[key].subcategories[e.subcategory_name];
+      if (!sub) {
+        acc[key].subcategories[e.subcategory_name] = { total: 0, items: {} };
+      }
+      acc[key].subcategories[e.subcategory_name].total += e.amount;
+      if (e.subitem_name) {
+        const items = acc[key].subcategories[e.subcategory_name].items;
+        items[e.subitem_name] = (items[e.subitem_name] || 0) + e.amount;
+      }
     }
     return acc;
-  }, {} as Record<string, { total: number; subcategories: Record<string, number> }>);
+  }, {} as Record<
+    string,
+    {
+      total: number;
+      color: string | null;
+      subcategories: Record<string, { total: number; items: Record<string, number> }>;
+    }
+  >);
 
   return {
     startBalance: startAmount,
