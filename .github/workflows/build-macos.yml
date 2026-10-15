@@ -1,0 +1,45 @@
+name: Build macOS (arm64)
+
+# Собирает .dmg на macOS-раннере GitHub.
+# С Windows собрать macOS-версию нельзя: electron-builder требует системные
+# утилиты macOS для создания образа диска.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+jobs:
+  build:
+    name: Build DMG (Apple Silicon)
+    runs-on: macos-latest
+
+    steps:
+      - name: Исходники
+        uses: actions/checkout@v4
+
+      - name: Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Установка зависимостей
+        run: npm ci
+
+      # Без сертификата разработчика подпись невозможна; отключаем её поиск,
+      # иначе electron-builder попытается искать identity и упадёт.
+      - name: Сборка .dmg
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build:mac
+
+      - name: Готовый образ
+        uses: actions/upload-artifact@v4
+        with:
+          name: Traty-Sani-mac-arm64
+          path: release/*.dmg
+          if-no-files-found: error
+          retention-days: 30

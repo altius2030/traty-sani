@@ -1,0 +1,16 @@
+node_modules/
+dist/
+release/
+
+# Служебные файлы и результаты проверок
+test-result.txt
+balance-test.txt
+cat-test.txt
+dbdump.txt
+verify.txt
+*.log
+*.out
+*.err
+
+.DS_Store
+Thumbs.db

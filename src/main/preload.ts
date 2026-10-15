@@ -1,0 +1,54 @@
+import { contextBridge, ipcRenderer } from 'electron';
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  /** 'win32' | 'darwin' | 'linux' — используется для адаптации оформления */
+  platform: (() => {
+    const arg = process.argv.find((a) => a.startsWith('--app-platform='));
+    return arg ? arg.split('=')[1] : process.platform;
+  })(),
+
+  getCategories: () => ipcRenderer.invoke('db:getCategories'),
+  addCategory: (name: string) => ipcRenderer.invoke('db:addCategory', name),
+  addSubcategory: (categoryId: number, name: string) => ipcRenderer.invoke('db:addSubcategory', categoryId, name),
+  deleteCategory: (id: number) => ipcRenderer.invoke('db:deleteCategory', id),
+  deleteSubcategory: (id: number) => ipcRenderer.invoke('db:deleteSubcategory', id),
+  
+  getExpenses: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getExpenses', { startDate, endDate }),
+  addExpense: (expense: { categoryId: number; subcategoryId?: number; amount: number; date: string; note?: string }) => 
+    ipcRenderer.invoke('db:addExpense', expense),
+  deleteExpense: (id: number) => ipcRenderer.invoke('db:deleteExpense', id),
+  
+  getBalanceHistory: () => ipcRenderer.invoke('db:getBalanceHistory'),
+  getCurrentBalance: () => ipcRenderer.invoke('db:getCurrentBalance'),
+  addBalance: (balance: { amount: number; date: string; note?: string }) => 
+    ipcRenderer.invoke('db:addBalance', balance),
+  deleteBalance: (id: number) => ipcRenderer.invoke('db:deleteBalance', id),
+
+  getDeposits: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getDeposits', { startDate, endDate }),
+  addDeposit: (deposit: { amount: number; date: string; note: string }) => 
+    ipcRenderer.invoke('db:addDeposit', deposit),
+  deleteDeposit: (id: number) => ipcRenderer.invoke('db:deleteDeposit', id),
+  
+  getReport: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getReport', { startDate, endDate }),
+  saveFile: (defaultPath: string, content: string) => ipcRenderer.invoke('dialog:saveFile', defaultPath, content),
+});
+
+declare global {
+  interface Window {
+    electronAPI: {
+      getCategories: () => Promise<any[]>;
+      addCategory: (name: string) => Promise<{ id: number; name: string; is_custom: number }>;
+      addSubcategory: (categoryId: number, name: string) => Promise<{ id: number; name: string; is_custom: number }>;
+      deleteCategory: (id: number) => Promise<{ success: boolean }>;
+      deleteSubcategory: (id: number) => Promise<{ success: boolean }>;
+      getExpenses: (startDate: string, endDate: string) => Promise<any[]>;
+      addExpense: (expense: { categoryId: number; subcategoryId?: number; amount: number; date: string; note?: string }) => Promise<any>;
+      deleteExpense: (id: number) => Promise<{ success: boolean }>;
+      getBalanceHistory: () => Promise<any[]>;
+      addBalance: (balance: { amount: number; date: string; note?: string }) => Promise<any>;
+      deleteBalance: (id: number) => Promise<{ success: boolean }>;
+      getReport: (startDate: string, endDate: string) => Promise<any>;
+      saveFile: (defaultPath: string, content: string) => Promise<{ success: boolean; path?: string }>;
+    };
+  }
+}
