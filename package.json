@@ -18,7 +18,7 @@
     "build:win": "electron-builder --win --x64",
     "build:portable": "npm run build && npm run build:template-db && electron-builder --win portable --x64",
     "prebuild:mac": "npm run build && npm run build:template-db",
-    "build:mac": "electron-builder --mac --arm64 --x64",
+    "build:mac": "electron-builder --mac --arm64",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -71,16 +71,16 @@
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["arm64", "x64"] }
+        { "target": "dmg", "arch": ["arm64"] }
       ],
       "category": "public.app-category.finance",
       "darkModeSupport": true,
       "gatekeeperAssess": false,
-      "identity": null
+      "identity": "-"
     },
     "dmg": {
       "title": "Траты Сани ${version}",
-      "artifactName": "Traty-Sani-${version}-${arch}.${ext}"
+      "artifactName": "Traty-Sani-${version}-arm64.${ext}"
     },
     "nsis": {
       "oneClick": false,

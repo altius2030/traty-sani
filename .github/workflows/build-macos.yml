@@ -28,26 +28,37 @@ jobs:
       - name: Установка зависимостей
         run: npm ci
 
-      # Без сертификата разработчика подпись невозможна; отключаем её поиск,
-      # иначе electron-builder попытается искать identity и упадёт.
-      - name: Сборка .dmg
+      - name: Сборка .app
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # Не ищем сертификат в Keychain — подписываем ad-hoc (identity: "-" в
+          # package.json). Раньше подпись пропускалась целиком, и оставалась
+          # только подпись линкера: macOS сообщал «приложение повреждено».
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build:mac
+        run: electron-builder --mac --arm64 --dir
 
-      # Проверяем, что собранный бандл валиден. Если эта проверка падает —
-      # macOS при запуске скажет «приложение повреждено».
-      - name: Проверка подписи и архитектуры
+      # Подпись должна быть нанесена ДО создания образа, иначе в .dmg попадёт
+      # неподписанная копия. Подписываем и запечатываем бандл целиком.
+      - name: Подпись бандла (ad-hoc) и снятие карантина
         run: |
+          set -e
           APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)
           echo "app: $APP"
-          codesign --verify --deep --strict --verbose=2 "$APP" || true
-          echo "--- артетектуры ---"
-          lipo -archs "$APP/Contents/MacOS/"* || true
-          echo "--- plist ---"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist"
+          xattr -cr "$APP"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "--- после подписи ---"
+          codesign -dv --verbose=2 "$APP"
+
+      - name: Проверка архитектуры
+        run: |
+          APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)
+          lipo -archs "$APP/Contents/MacOS/"*
+
+      - name: Сборка .dmg из подписанного бандла
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: electron-builder --mac --arm64
 
       - name: Готовый образ
         uses: actions/upload-artifact@v4
