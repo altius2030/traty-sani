@@ -32,15 +32,11 @@ jobs:
       - name: Установка зависимостей
         run: npm ci
 
-      - name: Подготовка (renderer, main, шаблонная БД)
-        run: npm run build && npm run build:template-db
-
       - name: Сборка
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        # npx, а не голый electron-builder: node_modules/.bin в PATH есть
-        # только внутри npm run
-        run: npx electron-builder --mac --arm64
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build:mac
 
       - name: Подпись бандла (ad-hoc)
         run: |
