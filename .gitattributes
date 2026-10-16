@@ -1,0 +1,13 @@
+# По умолчанию текст нормализуется в LF, иначе на Windows скрипты
+# получают CRLF и на macOS падают с
+# "bad interpreter: /usr/bin/env bash^M: No such file or directory".
+* text=auto eol=lf
+
+# Двоичные файлы не трогаем
+*.png binary
+*.ico binary
+*.jpg binary
+*.db binary
+*.dmg binary
+*.exe binary
+*.zip binary

@@ -138,7 +138,19 @@ npm run build:mac      # electron-builder --mac --arm64
 **Подпись macOS для автообновления**
 - Squirrel.Mac при обновлении сверяет «designated requirement» новой сборки с требованием уже установленной программы. У подписи ad-hoc (`codesign --sign -`) отпечаток меняется при каждой сборке, поэтому требования никогда не совпадут: обновление скачается, но не установится
 - Подойдёт **стабильный самоподписанный сертификат** — сверяется не сертификат Apple, а требование приложения. Нужен бесплатный
-- Создать сертификат: `bash scripts/make-mac-cert.sh` на Mac. Скрипт даст `TratySani.p12` (закрытый ключ, в репозиторий не класть) и `TratySani.cer` (открытый)
+- Создать сертификат можно **без репозитория** — одной командой в Терминале на Mac:
+
+  ```bash
+  cd ~ && mkdir -p traty-cert && cd traty-cert && \
+  openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 36500 \
+    -keyout TratySani.key -out TratySani.cer \
+    -subj "/CN=Traty Sani Release/O=Traty Sani" && \
+  openssl pkcs12 -export -out TratySani.p12 -inkey TratySani.key -in TratySani.cer && \
+  rm TratySani.key && ls -l TratySani.p12 TratySani.cer
+  ```
+
+  Команда запросит пароль для ключа — запомните его, он пойдёт в секрет. Если `openssl` не найден, сначала `xcode-select --install`
+- Тот же скрипт есть в репозитории: `bash scripts/make-mac-cert.sh`. Запускать нужно **из корня репозитория** — иначе bash не найдёт файл по относительному пути. Флаг `.gitattributes` фиксирует переносы строк как LF, чтобы скрипт не падал с `bad interpreter`
 - Положить `TratySani.p12` в секрет GitHub `MAC_CSC_P12` в виде base64 (`base64 -i TratySani.p12 | pbcopy`) и добавить секрет `MAC_CSC_PASSWORD`
 - На каждом Mac один раз установить и доверить сертификат (нужен sudo):
   `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain TratySani.cer`
