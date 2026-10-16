@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ShoppingCart,
   Car,
@@ -8,6 +8,7 @@ import {
   Trash2,
   Wallet,
   Save,
+  ChevronDown,
 } from 'lucide-react';
 import type { Category, Subcategory, Subitem } from '../types';
 import { formatMoney } from '../lib/format';
@@ -21,8 +22,8 @@ interface SidebarProps {
   currentBalance: number;
   baseCheckpoint: { amount: number; date: string | null };
   onSelectCategory: (categoryId: number) => void;
-  onSelectSubcategory: (subcategoryId: number) => void;
-  onSelectSubitem: (subitemId: number) => void;
+  onSelectSubcategory: (subcategoryId: number | null) => void;
+  onSelectSubitem: (subitemId: number | null) => void;
   onAddExpense: (categoryId: number, subcategoryId?: number, subitemId?: number) => void;
   onDeleteSubitem: (id: number) => void;
   onOpenCategoryManager: () => void;
@@ -32,15 +33,19 @@ interface SidebarProps {
   onDeleteSubcategory: (id: number) => void;
 }
 
+const WIDTH_KEY = 'traty-sidebar-width';
+const MIN_WIDTH = 200;
+const MAX_WIDTH = 440;
+
 function getCategoryIcon(name: string, iconKey?: string | null) {
   if (iconKey) {
     const def = getCategoryIconDef(iconKey);
     const I = def.Icon;
-    return <I size={18} style={{ color: def.color }} />;
+    return <I size={20} style={{ color: def.color }} />;
   }
-  if (name === 'Закуп') return <ShoppingCart size={18} color="#ffffff" />;
-  if (name === 'Такси') return <Car size={18} color="#ffffff" />;
-  return <Star size={18} color="#ffffff" />;
+  if (name === 'Закуп') return <ShoppingCart size={20} color="#ffffff" />;
+  if (name === 'Такси') return <Car size={20} color="#ffffff" />;
+  return <Star size={20} color="#ffffff" />;
 }
 
 function getCategoryClass(name: string, isCustom: number, iconKey?: string | null): string {
@@ -70,103 +75,178 @@ export default function Sidebar({
   onDeleteCategory,
   onDeleteSubcategory,
 }: SidebarProps) {
-  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  // Раскрытая категория: плитка → выезжающий список её подкатегорий
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [width, setWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem(WIDTH_KEY));
+    return Number.isFinite(saved) && saved >= MIN_WIDTH && saved <= MAX_WIDTH
+      ? saved
+      : 280;
+  });
 
-  const toggleExpand = (id: number) => {
-    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  const sidebarRef = useRef<HTMLElement>(null);
+
+  // Перетаскивание правой границы панели
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = e.currentTarget.parentElement?.offsetWidth ?? 280;
+
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(
+        MAX_WIDTH,
+        Math.max(MIN_WIDTH, startWidth + (ev.clientX - startX))
+      );
+      setWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      setWidth((w) => {
+        localStorage.setItem(WIDTH_KEY, String(Math.round(w)));
+        return w;
+      });
+    };
+
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  // Двойной клик по границе возвращает ширину по умолчанию
+  const resetWidth = () => {
+    setWidth(280);
+    localStorage.setItem(WIDTH_KEY, '280');
   };
 
-  const isExpanded = (id: number) => expanded[id] ?? false;
+  // Клик вне панели закрывает выезжающий список
+  useEffect(() => {
+    if (openId === null) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+        setOpenId(null);
+      }
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [openId]);
+
+  const handleTileClick = (cat: Category) => {
+    const next = openId === cat.id ? null : cat.id;
+    setOpenId(next);
+    onSelectCategory(cat.id);
+    if (next === null) {
+      onSelectSubcategory(null);
+      onSelectSubitem(null);
+    }
+  };
+
+  const open = categories.find((c) => c.id === openId);
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" ref={sidebarRef} style={{ width }}>
+      <div className="sidebar-resize-handle" onMouseDown={startResize} onDoubleClick={resetWidth}>
+        <span className="sidebar-resize-grip" />
+      </div>
+
       <div className="sidebar-section">
         <div className="sidebar-section-title">Категории</div>
-        <div className="category-list">
+
+        {/* Плитки — как на телефоне: значок сверху, подпись под ним */}
+        <div className="tile-grid">
           {categories.map((cat) => {
             const subs: Subcategory[] = Array.isArray(cat.subcategories)
               ? (cat.subcategories as Subcategory[])
               : [];
-            const isActive = selectedCategoryId === cat.id;
+            const isOpen = openId === cat.id;
             const catClass = getCategoryClass(cat.name, cat.is_custom, cat.icon);
+            const iconColor = cat.icon ? getCategoryIconDef(cat.icon).color : null;
 
             return (
-              <div key={cat.id}>
-                <div
-                  className={`category-item ${isActive ? 'active' : ''}`}
-                  onClick={() => {
-                    toggleExpand(cat.id);
-                    onSelectCategory(cat.id);
-                  }}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      toggleExpand(cat.id);
-                      onSelectCategory(cat.id);
-                    }
-                  }}
+              <button
+                key={cat.id}
+                className={`tile ${isOpen ? 'open' : ''} ${
+                  selectedCategoryId === cat.id && !isOpen ? 'active' : ''
+                }`}
+                onClick={() => handleTileClick(cat)}
+                title={cat.name}
+                aria-expanded={isOpen}
+              >
+                <span
+                  className={`tile-icon ${cat.icon ? '' : catClass}`}
+                  style={
+                    iconColor
+                      ? {
+                          background: `${iconColor}26`,
+                          boxShadow: `inset 0 0 0 1px ${iconColor}55`,
+                        }
+                      : undefined
+                  }
                 >
-                  <div className="category-info">
-                    <div
-                      className={`category-icon ${cat.icon ? '' : catClass}`}
-                      style={
-                        cat.icon
-                          ? {
-                              background: `${getCategoryIconDef(cat.icon).color}26`,
-                              boxShadow: `inset 0 0 0 1px ${getCategoryIconDef(cat.icon).color}55`,
-                            }
-                          : undefined
-                      }
-                    >
-                      {getCategoryIcon(cat.name, cat.icon)}
-                    </div>
-                    <span className="category-name">{cat.name}</span>
-                  </div>
-                  <div className="category-actions">
-                    <button
-                      className="btn-icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAddExpense(cat.id);
-                      }}
-                      title="Добавить трату"
-                    >
-                      <Plus size={16} />
-                    </button>
-                    <button
-                      className="btn-icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteCategory(cat.id);
-                      }}
-                      title="Удалить категорию"
-                    >
-                      <Trash2 size={14} color="var(--accent-danger)" />
-                    </button>
-                  </div>
-                </div>
+                  {getCategoryIcon(cat.name, cat.icon)}
+                  {subs.length > 0 && <span className="tile-badge">{subs.length}</span>}
+                </span>
+                <span className="tile-name">{cat.name}</span>
+              </button>
+            );
+          })}
+        </div>
 
-                {isExpanded(cat.id) && subs.length > 0 && (
-                  <div className="subcategory-list">
-                    {subs.map((sub) => {
-                      const items: Subitem[] = Array.isArray(sub.items)
-                        ? (sub.items as Subitem[])
-                        : [];
-                      return (
-                      <div
-                        key={sub.id}
-                        className="subcategory-node"
-                      >
+        {/* Выезжающий список подкатегорий выбранной плитки */}
+        {open && (
+          <div className="tile-panel">
+            <div className="tile-panel-head">
+              <button
+                className="btn btn-secondary tile-panel-add"
+                onClick={() => onAddExpense(open.id)}
+                title="Добавить трату без подкатегории"
+              >
+                <Plus size={14} />
+                Трата
+              </button>
+              <span className="tile-panel-title">{open.name}</span>
+              <button
+                className="action-btn"
+                onClick={() => onDeleteCategory(open.id)}
+                title="Удалить категорию"
+              >
+                <Trash2 size={15} color="var(--accent-danger)" />
+              </button>
+              <button
+                className="action-btn"
+                onClick={() => setOpenId(null)}
+                title="Свернуть"
+              >
+                <ChevronDown size={16} />
+              </button>
+            </div>
+
+            {(() => {
+              const subs: Subcategory[] = Array.isArray(open.subcategories)
+                ? (open.subcategories as Subcategory[])
+                : [];
+              if (subs.length === 0) {
+                return <div className="empty-hint">Подкатегорий пока нет</div>;
+              }
+              return (
+                <div className="tile-panel-list">
+                  {subs.map((sub) => {
+                    const items: Subitem[] = Array.isArray(sub.items)
+                      ? (sub.items as Subitem[])
+                      : [];
+                    return (
+                      <div key={sub.id} className="subcategory-node">
                         <div
                           className={`subcategory-item ${
                             selectedSubcategoryId === sub.id ? 'selected' : ''
                           }`}
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={() => {
                             onSelectSubcategory(sub.id);
-                            onAddExpense(cat.id, sub.id);
+                            onSelectSubitem(null);
+                            onAddExpense(open.id, sub.id);
                           }}
                           role="button"
                           tabIndex={0}
@@ -174,7 +254,7 @@ export default function Sidebar({
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault();
                               onSelectSubcategory(sub.id);
-                              onAddExpense(cat.id, sub.id);
+                              onAddExpense(open.id, sub.id);
                             }
                           }}
                         >
@@ -204,7 +284,7 @@ export default function Sidebar({
                                   e.stopPropagation();
                                   onSelectSubcategory(sub.id);
                                   onSelectSubitem(item.id);
-                                  onAddExpense(cat.id, sub.id, item.id);
+                                  onAddExpense(open.id, sub.id, item.id);
                                 }}
                                 role="button"
                                 tabIndex={0}
@@ -212,7 +292,7 @@ export default function Sidebar({
                                   if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault();
                                     onSelectSubitem(item.id);
-                                    onAddExpense(cat.id, sub.id, item.id);
+                                    onAddExpense(open.id, sub.id, item.id);
                                   }
                                 }}
                               >
@@ -232,14 +312,13 @@ export default function Sidebar({
                           </div>
                         )}
                       </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         <button className="add-btn" onClick={onOpenCategoryManager}>
           <Settings size={16} />
@@ -249,36 +328,17 @@ export default function Sidebar({
 
       <div className="sidebar-section" style={{ marginTop: 'auto' }}>
         <div className="sidebar-section-title">Баланс</div>
-        <div
-          style={{
-            padding: '16px',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 8,
-            textAlign: 'center',
-          }}
-        >
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-            Текущий остаток
-          </div>
+        <div className="sidebar-balance">
+          <div className="sidebar-balance-label">Текущий остаток</div>
           <div
+            className="sidebar-balance-value"
             style={{
-              fontSize: 24,
-              fontWeight: 700,
-              fontVariantNumeric: 'tabular-nums',
               color: currentBalance >= 0 ? 'var(--accent-primary)' : 'var(--accent-danger)',
             }}
           >
             {formatMoney(currentBalance)}
           </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: 'var(--text-muted)',
-              marginTop: 6,
-              lineHeight: 1.4,
-            }}
-          >
+          <div className="sidebar-balance-hint">
             {baseCheckpoint.date ? (
               <>
                 отметка {formatMoney(baseCheckpoint.amount)} от{' '}

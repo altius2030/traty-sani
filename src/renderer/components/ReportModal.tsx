@@ -12,8 +12,17 @@ interface ReportModalProps {
   onExportXlsx: (report: Report, period: Period) => void;
 }
 
+type ReportTab = 'all' | 'expenses' | 'deposits';
+
+const TABS: { id: ReportTab; label: string }[] = [
+  { id: 'all', label: 'Общий отчёт' },
+  { id: 'expenses', label: 'Траты' },
+  { id: 'deposits', label: 'Внесения' },
+];
+
 export default function ReportModal({ period, onClose, onExport, onExportXlsx }: ReportModalProps) {
   const [report, setReport] = useState<Report | null>(null);
+  const [tab, setTab] = useState<ReportTab>('all');
 
   // Точки в таблицах берут те же цвета, что и сектора диаграмм
   const expenseColors = report ? expenseColorMap(report) : {};
@@ -43,13 +52,37 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal report-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2 className="modal-title">
-            Отчёт: {getPeriodLabel(period)}
-          </h2>
-          <button className="modal-close" onClick={onClose} aria-label="Закрыть">
-            <X size={20} />
-          </button>
+        {/* Шапка и вкладки липкие: при прокрутке длинного отчёта заголовок
+            и переключатель вкладок остаются на виду */}
+        <div className="report-head">
+          <div className="modal-header">
+            <h2 className="modal-title">
+              Отчёт: {getPeriodLabel(period)}
+            </h2>
+            <button className="modal-close" onClick={onClose} aria-label="Закрыть">
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="report-tabs" role="tablist">
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={tab === t.id}
+                className={`report-tab ${tab === t.id ? 'active' : ''}`}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label}
+                {report && t.id === 'expenses' && report.expenses.length > 0 && (
+                  <span className="report-tab-count">{report.expenses.length}</span>
+                )}
+                {report && t.id === 'deposits' && report.deposits.length > 0 && (
+                  <span className="report-tab-count">{report.deposits.length}</span>
+                )}
+              </button>
+            ))}
+          </div>
         </div>
 
         {loading ? (
@@ -58,6 +91,7 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
           </div>
         ) : report ? (
           <>
+            {tab === 'all' && (
             <div className="report-summary">
               <div className="summary-card">
                 <div className="summary-label">
@@ -100,7 +134,77 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
                 </div>
               </div>
             </div>
+            )}
 
+            {/* Отдельная сводка по вкладкам «Траты» и «Внесения» */}
+            {tab === 'expenses' && (
+              <div className="report-summary">
+                <div className="summary-card">
+                  <div className="summary-label">
+                    <TrendingDown size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                    Траты за период
+                  </div>
+                  <div className="summary-value negative">
+                    {formatMoney(report.totalExpenses)}
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-label">Операций</div>
+                  <div className="summary-value neutral">{report.expenses.length}</div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-label">Категорий</div>
+                  <div className="summary-value neutral">
+                    {Object.keys(report.byCategory).length}
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-label">Средняя трата</div>
+                  <div className="summary-value neutral">
+                    {formatMoney(
+                      report.expenses.length
+                        ? report.totalExpenses / report.expenses.length
+                        : 0
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === 'deposits' && (
+              <div className="report-summary">
+                <div className="summary-card">
+                  <div className="summary-label">
+                    <Banknote size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                    Внесено за период
+                  </div>
+                  <div className="summary-value positive">
+                    +{formatMoney(report.totalDeposits)}
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-label">Операций</div>
+                  <div className="summary-value neutral">{report.deposits.length}</div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-label">Категорий</div>
+                  <div className="summary-value neutral">
+                    {Object.keys(report.byDepositCategory || {}).length}
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-label">Среднее</div>
+                  <div className="summary-value neutral">
+                    {formatMoney(
+                      report.deposits.length ? report.totalDeposits / report.deposits.length : 0
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === 'all' && (
+            <>
             {/* Движение денег: начало → внесения → траты → расчётный выход */}
             <div className="deposit-summary-card" style={{ marginBottom: 20 }}>
               <div className="summary-label" style={{ marginBottom: 4 }}>
@@ -176,19 +280,43 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
                   ' — она внутри периода, поэтому операции до неё не дублируются'}
               </div>
             )}
+            </>
+            )}
 
-            {report.expenses.length === 0 && report.deposits.length === 0 ? (
-              <div className="empty-state">
-                <Receipt size={48} className="empty-state-icon" />
-                <div className="empty-state-title">
-                  Нет операций за выбранный период
-                </div>
-              </div>
-            ) : (
+            {(() => {
+              // Пустая вкладка — это «нет трат» или «нет внесений»,
+              // а не «нет операций вообще»
+              const isEmpty =
+                tab === 'expenses'
+                  ? report.expenses.length === 0
+                  : tab === 'deposits'
+                  ? report.deposits.length === 0
+                  : report.expenses.length === 0 && report.deposits.length === 0;
+              const emptyText =
+                tab === 'expenses'
+                  ? 'Нет трат за выбранный период'
+                  : tab === 'deposits'
+                  ? 'Нет внесений за выбранный период'
+                  : 'Нет операций за выбранный период';
+
+              if (isEmpty) {
+                return (
+                  <div className="empty-state">
+                    <Receipt size={48} className="empty-state-icon" />
+                    <div className="empty-state-title">{emptyText}</div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            {!((tab === 'expenses' && report.expenses.length === 0) ||
+              (tab === 'deposits' && report.deposits.length === 0) ||
+              (tab === 'all' && report.expenses.length === 0 && report.deposits.length === 0)) && (
               <>
-                <ReportCharts report={report} />
+                <ReportCharts report={report} mode={tab} />
 
-            {report.expenses.length > 0 && (
+            {(tab === 'all' || tab === 'expenses') && report.expenses.length > 0 && (
                   <div className="report-breakdown">
                     <div className="breakdown-title">Расходы по категориям</div>
                     <table className="breakdown-table">
@@ -247,7 +375,7 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
                   </div>
                 )}
 
-                {report.deposits.length > 0 && (
+                {tab === 'deposits' && report.deposits.length > 0 && (
                   <div className="report-breakdown">
                     <div className="breakdown-title">Внесения за период</div>
                 <table className="breakdown-table">
@@ -310,7 +438,7 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
 
             {/* Дублируем общие внесения под всеми данными: та же сумма, что в
                 карточке сверху, но с раскладкой по категориям и количеством */}
-            {report.deposits.length > 0 && (
+            {(tab === 'all' || tab === 'deposits') && report.deposits.length > 0 && (
               <div className="report-breakdown">
                 <div className="breakdown-title">Итоги внесений</div>
                 <div className="summary-grid">

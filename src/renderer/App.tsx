@@ -358,7 +358,7 @@ function App() {
     setSelectedSubitemId(null);
   };
 
-  const handleSelectSubcategory = (id: number) => {
+  const handleSelectSubcategory = (id: number | null) => {
     setSelectedSubcategoryId(id);
   };
 

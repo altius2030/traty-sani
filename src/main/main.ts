@@ -10,7 +10,6 @@ import {
 } from 'fs';
 import Database from 'better-sqlite3';
 import { applySchema } from './schema';
-import { buildXlsx } from './xlsx';
 
 /** Данные для экспорта отчёта в Excel — собираются в интерфейсе */
 interface ReportXlsxPayload {
@@ -872,6 +871,10 @@ ipcMain.handle('report:exportXlsx', async (_, payload: ReportXlsxPayload) => {
       anchor: { fromCol: 6, fromRow: 43, toCol: 14, toRow: 62 },
     },
   ].filter((c) => (c.type === 'bar' ? true : c.points.length > 0));
+
+  // Генератор Excel тянет за собой jszip (~45 мс на разбор), а нужен он
+  // только при экспорте. Ленивый импорт убирает эти 45 мс из запуска.
+  const { buildXlsx } = await import('./xlsx');
 
   const buf = await buildXlsx([
     {

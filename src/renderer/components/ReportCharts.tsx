@@ -7,6 +7,9 @@ import { depositColorMap, expenseColorMap } from '../lib/reportColors';
  * приложение работает офлайн, а лишние зависимости увеличивают сборку.
  */
 
+/** Какая вкладка отчёта открыта — определяет, чьи графики показывать */
+export type ChartMode = 'all' | 'expenses' | 'deposits';
+
 interface Slice {
   label: string;
   value: number;
@@ -99,25 +102,34 @@ function DonutChart({
 }
 
 /** Столбчатая диаграмма: траты по дням периода */
-function BarChart({ data }: { data: { label: string; expense: number; deposit: number }[] }) {
+function BarChart({
+  data,
+  mode,
+}: {
+  data: { label: string; expense: number; deposit: number }[];
+  mode: ChartMode;
+}) {
   const max = Math.max(1, ...data.map((d) => Math.max(d.expense, d.deposit)));
 
   if (data.length === 0) {
     return <div className="chart-empty">Нет операций за период</div>;
   }
 
+  const showExpense = mode !== 'deposits';
+  const showDeposit = mode !== 'expenses';
+
   return (
     <div className="chart-bars">
       {data.map((d) => (
         <div key={d.label} className="chart-bar-col" title={`${d.label}: расход ${formatMoney(d.expense)}, внесено ${formatMoney(d.deposit)}`}>
           <div className="chart-bar-track">
-            {d.deposit > 0 && (
+            {showDeposit && d.deposit > 0 && (
               <div
                 className="chart-bar chart-bar-deposit"
                 style={{ height: `${(d.deposit / max) * 100}%` }}
               />
             )}
-            {d.expense > 0 && (
+            {showExpense && d.expense > 0 && (
               <div
                 className="chart-bar chart-bar-expense"
                 style={{ height: `${(d.expense / max) * 100}%` }}
@@ -131,7 +143,13 @@ function BarChart({ data }: { data: { label: string; expense: number; deposit: n
   );
 }
 
-export default function ReportCharts({ report }: { report: Report }) {
+export default function ReportCharts({
+  report,
+  mode = 'all',
+}: {
+  report: Report;
+  mode?: ChartMode;
+}) {
   // Цвета раздаёт общий модуль: те же оттенки показываются в точках таблиц
   // отчёта, иначе данные выглядели бы неоднозначно.
   const expenseColors = expenseColorMap(report);
@@ -178,20 +196,26 @@ export default function ReportCharts({ report }: { report: Report }) {
       deposit: v.deposit,
     }));
 
-  if (slices.length === 0 && incomeSlices.length === 0 && days.length === 0) {
+  const wantExpenses = mode !== 'deposits';
+  const wantDeposits = mode !== 'expenses';
+  const showExpenseDonut = wantExpenses && slices.length > 0;
+  const showIncomeDonut = wantDeposits && incomeSlices.length > 0;
+  const showDays = days.length > 0;
+
+  if (!showExpenseDonut && !showIncomeDonut && !showDays) {
     return null;
   }
 
   return (
     <div className="charts-block">
-      {slices.length > 0 && (
+      {showExpenseDonut && (
         <div className="chart-card">
           <div className="breakdown-title">Расходы по категориям</div>
           <DonutChart data={slices} total={total} />
         </div>
       )}
 
-      {incomeSlices.length > 0 && (
+      {showIncomeDonut && (
         <div className="chart-card">
           <div className="breakdown-title">Приход по категориям</div>
           <DonutChart
@@ -203,20 +227,24 @@ export default function ReportCharts({ report }: { report: Report }) {
         </div>
       )}
 
-      {days.length > 0 && (
+      {showDays && (
         <div className="chart-card">
           <div className="breakdown-title">Динамика по дням</div>
           <div className="chart-legend chart-legend-inline">
-            <span className="chart-legend-item">
-              <span className="chart-legend-dot" style={{ background: '#ff4757' }} />
-              Траты
-            </span>
-            <span className="chart-legend-item">
-              <span className="chart-legend-dot" style={{ background: '#00d4aa' }} />
-              Внесения
-            </span>
+            {wantExpenses && (
+              <span className="chart-legend-item">
+                <span className="chart-legend-dot" style={{ background: '#ff4757' }} />
+                Траты
+              </span>
+            )}
+            {wantDeposits && (
+              <span className="chart-legend-item">
+                <span className="chart-legend-dot" style={{ background: '#00d4aa' }} />
+                Внесения
+              </span>
+            )}
           </div>
-          <BarChart data={days} />
+          <BarChart data={days} mode={mode} />
         </div>
       )}
     </div>
