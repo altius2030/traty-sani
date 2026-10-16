@@ -165,12 +165,30 @@ export function normalizeColor(value?: string | null): string | null {
 }
 
 /**
- * Цвет категории для диаграммы: сначала явно выбранный пользователем,
- * иначе — по позиции в палитре.
+ * Раздаёт цвета секторам диаграммы.
+ *
+ * Выбранные пользователем цвета уважаются, а для категорий без цвета
+ * подбирается свободный от палитры. Иначе «Без категории» могла бы получить
+ * тот же оттенок, что и соседняя категория с явным выбором, и сектора
+ * слились бы ровно так, ради чего всё и затевалось.
  */
-export function pickChartColor(
-  index: number,
-  chosen?: string | null
-): string {
-  return normalizeColor(chosen) || CHART_COLORS[index % CHART_COLORS.length];
+export function assignChartColors<T extends { color?: string | null }>(
+  items: T[]
+): string[] {
+  const used = new Set(
+    items.map((it) => normalizeColor(it.color)).filter((c): c is string => !!c)
+  );
+
+  const freePalette = CHART_COLORS.filter((c) => !used.has(c));
+  // Если палитра исчерпана (больше категорий, чем цветов), продолжаем по кругу
+  const fallback = freePalette.length ? freePalette : CHART_COLORS;
+
+  let freeIndex = 0;
+  return items.map((it) => {
+    const explicit = normalizeColor(it.color);
+    if (explicit) return explicit;
+    const next = fallback[freeIndex % fallback.length];
+    freeIndex++;
+    return next;
+  });
 }

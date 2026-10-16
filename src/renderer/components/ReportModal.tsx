@@ -1,17 +1,23 @@
 import { useEffect, useState, Fragment } from 'react';
 import ReportCharts from './ReportCharts';
-import { X, FileDown, TrendingDown, Wallet, Receipt, Banknote } from 'lucide-react';
+import { X, FileDown, TrendingDown, Wallet, Receipt, Banknote, Sheet } from 'lucide-react';
 import type { Period, Report } from '../types';
 import { formatMoney, getPeriodLabel } from '../lib/format';
+import { depositColorMap, expenseColorMap } from '../lib/reportColors';
 
 interface ReportModalProps {
   period: Period;
   onClose: () => void;
   onExport: (report: Report, period: Period) => void;
+  onExportXlsx: (report: Report, period: Period) => void;
 }
 
-export default function ReportModal({ period, onClose, onExport }: ReportModalProps) {
+export default function ReportModal({ period, onClose, onExport, onExportXlsx }: ReportModalProps) {
   const [report, setReport] = useState<Report | null>(null);
+
+  // Точки в таблицах берут те же цвета, что и сектора диаграмм
+  const expenseColors = report ? expenseColorMap(report) : {};
+  const depositColors = report ? depositColorMap(report) : {};
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -200,7 +206,7 @@ export default function ReportModal({ period, onClose, onExport }: ReportModalPr
                                 <span
                                   className="chart-legend-dot"
                                   style={{
-                                    background: data.color || 'var(--accent-primary)',
+                                    background: expenseColors[catName],
                                     display: 'inline-block',
                                     marginRight: 8,
                                   }}
@@ -279,16 +285,19 @@ export default function ReportModal({ period, onClose, onExport }: ReportModalPr
 
                 {/* Итог по категориям внесений — чтобы было видно, откуда
                     пришли деньги, а не только сумму по дням */}
-                {Object.keys(report.byDepositCategory || {}).length > 1 && (
+                {Object.keys(report.byDepositCategory || {}).length > 0 && (
                   <div className="deposit-totals">
                     {Object.entries(report.byDepositCategory)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([name, total]) => (
+                      .sort((a, b) => b[1].total - a[1].total)
+                      .map(([name, data]) => (
                         <div key={name} className="deposit-total-row">
-                          <span className="chart-legend-dot" style={{ background: 'var(--accent-primary)' }} />
+                          <span
+                            className="chart-legend-dot"
+                            style={{ background: depositColors[name] }}
+                          />
                           <span className="deposit-total-name">{name}</span>
                           <span className="deposit-total-sum">
-                            {formatMoney(total)}
+                            {formatMoney(data.total)}
                           </span>
                         </div>
                       ))}
@@ -299,9 +308,107 @@ export default function ReportModal({ period, onClose, onExport }: ReportModalPr
               </>
             )}
 
+            {/* Дублируем общие внесения под всеми данными: та же сумма, что в
+                карточке сверху, но с раскладкой по категориям и количеством */}
+            {report.deposits.length > 0 && (
+              <div className="report-breakdown">
+                <div className="breakdown-title">Итоги внесений</div>
+                <div className="summary-grid">
+                  <div className="summary-cell">
+                    <span className="summary-label">Всего внесено</span>
+                    <span className="summary-value income">
+                      {formatMoney(report.totalDeposits)}
+                    </span>
+                  </div>
+                  <div className="summary-cell">
+                    <span className="summary-label">Операций</span>
+                    <span className="summary-value">{report.deposits.length}</span>
+                  </div>
+                  <div className="summary-cell">
+                    <span className="summary-label">Категорий</span>
+                    <span className="summary-value">
+                      {Object.keys(report.byDepositCategory || {}).length}
+                    </span>
+                  </div>
+                  <div className="summary-cell">
+                    <span className="summary-label">Среднее</span>
+                    <span className="summary-value">
+                      {formatMoney(report.totalDeposits / report.deposits.length)}
+                    </span>
+                  </div>
+                </div>
+
+                <table className="breakdown-table summary-table">
+                  <thead>
+                    <tr>
+                      <th>Категория</th>
+                      <th style={{ textAlign: 'right' }}>Сумма</th>
+                      <th style={{ textAlign: 'right' }}>Доля</th>
+                      <th style={{ textAlign: 'right' }}>Операций</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(report.byDepositCategory)
+                      .sort((a, b) => b[1].total - a[1].total)
+                      .map(([name, data]) => {
+                        const count = report.deposits.filter(
+                          (d) => (d.category_name || 'Без категории') === name
+                        ).length;
+                        const share =
+                          report.totalDeposits > 0
+                            ? ((data.total / report.totalDeposits) * 100).toFixed(1)
+                            : '0.0';
+                        return (
+                          <tr key={name}>
+                            <td>
+                              <span
+                                className="chart-legend-dot"
+                                style={{
+                                  background: depositColors[name],
+                                  display: 'inline-block',
+                                  marginRight: 8,
+                                }}
+                              />
+                              {name}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {formatMoney(data.total)}
+                            </td>
+                            <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>
+                              {share}%
+                            </td>
+                            <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>
+                              {count}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    <tr className="summary-total-row">
+                      <td>
+                        <strong>Итого</strong>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <strong>{formatMoney(report.totalDeposits)}</strong>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <strong>100%</strong>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <strong>{report.deposits.length}</strong>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={onClose}>
                 Закрыть
+              </button>
+              <button className="btn btn-secondary" onClick={() => onExportXlsx(report, period)}>
+                <Sheet size={18} />
+                Экспорт в Excel
               </button>
               <button className="btn btn-primary" onClick={() => onExport(report, period)}>
                 <FileDown size={18} />

@@ -10,6 +10,23 @@ import {
 } from 'fs';
 import Database from 'better-sqlite3';
 import { applySchema } from './schema';
+import { buildXlsx } from './xlsx';
+
+/** Данные для экспорта отчёта в Excel — собираются в интерфейсе */
+interface ReportXlsxPayload {
+  title: string;
+  period: string;
+  startBalance: number;
+  totalDeposits: number;
+  totalExpenses: number;
+  endBalance: number;
+  checkpoint?: { amount: number; date: string | null } | null;
+  expenseRows: { date: string; category: string; subcategory: string; item: string; amount: number; note: string }[];
+  depositRows: { date: string; category: string; amount: number }[];
+  expenseByCategory: { name: string; total: number; color: string | null }[];
+  depositByCategory: { name: string; total: number; color: string | null }[];
+  byDay: { label: string; expense: number; deposit: number }[];
+}
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -562,6 +579,12 @@ ipcMain.handle('db:deleteDepositCategory', (_, id: number) => {
   return { success: true };
 });
 
+ipcMain.handle('db:setDepositCategoryColor', (_, id: number, color: string | null) => {
+  const clean = color && typeof color === 'string' ? color.trim() : null;
+  db!.prepare(`UPDATE deposit_categories SET color = ? WHERE id = ?`).run(clean || null, id);
+  return { success: true };
+});
+
 ipcMain.handle('db:addDeposit', (_, deposit: { amount: number; date: string; categoryId: number }) => {
   // Валидация на сервере: дублируем проверки из UI, чтобы обойти их было нельзя.
   const amount = Number(deposit.amount);
@@ -645,10 +668,11 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     date: string;
     category_id?: number | null;
     category_name?: string | null;
+    category_color?: string | null;
   }>;
 
   const DEPOSIT_SELECT = `
-    SELECT d.*, c.name as category_name
+    SELECT d.*, c.name as category_name, c.color as category_color
     FROM deposits d
     LEFT JOIN deposit_categories c ON d.category_id = c.id`;
   // AFTER_CP написан без алиасов — после JOIN колонка date станет неоднозначной.
@@ -727,9 +751,11 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
   // поэтому для них отдельный ключ, чтобы сумма не потерялась.
   const byDepositCategory = deposits.reduce((acc, d) => {
     const key = d.category_name || 'Без категории';
-    acc[key] = (acc[key] || 0) + d.amount;
+    if (!acc[key]) acc[key] = { total: 0, color: d.category_color || null };
+    acc[key].total += d.amount;
+    if (!acc[key].color && d.category_color) acc[key].color = d.category_color;
     return acc;
-  }, {} as Record<string, number>);
+  }, {} as Record<string, { total: number; color: string | null }>);
 
   return {
     startBalance: startAmount,
@@ -744,6 +770,121 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     byDepositCategory,
     period: { startDate, endDate },
   };
+});
+
+/**
+ * Экспорт отчёта в Excel с нативными графиками.
+ * Файл собирает наш генератор OOXML: готовые библиотеки графики не умеют.
+ */
+ipcMain.handle('report:exportXlsx', async (_, payload: ReportXlsxPayload) => {
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow!, {
+    defaultPath: `Отчёт ${payload.period || ''}.xlsx`.trim(),
+    filters: [{ name: 'Excel Files', extensions: ['xlsx'] }],
+  });
+  if (canceled || !filePath) return { success: false };
+
+  const MONEY = '#,##0.00';
+  const isNum = (v: number | null | undefined) =>
+    typeof v === 'number' && Number.isFinite(v) ? v : 0;
+
+  // ——— Лист «Отчёт» ———
+  const rows: (string | number | { value: string | number; bold?: boolean; fill?: string; numFmt?: string } | null)[][] = [
+    [{ value: payload.title || 'Отчёт', bold: true }],
+    [{ value: `Период: ${payload.period}`, bold: false }],
+    [],
+    [{ value: 'Показатель', bold: true }, { value: 'Сумма, ₸', bold: true }],
+    [{ value: 'Начало (база)', bold: true }, { value: isNum(payload.startBalance), numFmt: MONEY }],
+    [{ value: 'Внесения за период', bold: true }, { value: isNum(payload.totalDeposits), numFmt: MONEY }],
+    [{ value: 'Траты за период', bold: true }, { value: isNum(payload.totalExpenses), numFmt: MONEY }],
+    [{ value: 'На выходе', bold: true }, { value: isNum(payload.endBalance), numFmt: MONEY, fill: '#00d4aa' }],
+  ];
+
+  if (payload.checkpoint?.date) {
+    rows.push([
+      { value: `Базовая отметка: ${isNum(payload.checkpoint.amount)} ₸ от ${payload.checkpoint.date}` },
+    ]);
+  }
+
+  // Дублируем итоговые внесения в конце отчёта — так же, как в интерфейсе
+  rows.push([]);
+  rows.push([{ value: 'Все внесения за период (итого)', bold: true }, { value: isNum(payload.totalDeposits), bold: true, numFmt: MONEY }]);
+  for (const d of payload.depositRows) {
+    rows.push([`  ${d.date}`, d.category || 'Без категории', { value: isNum(d.amount), numFmt: MONEY }]);
+  }
+
+  rows.push([]);
+  rows.push([
+    { value: 'Дата', bold: true },
+    { value: 'Категория', bold: true },
+    { value: 'Подкатегория', bold: true },
+    { value: 'Статья', bold: true },
+    { value: 'Сумма, ₸', bold: true },
+    { value: 'Комментарий', bold: true },
+  ]);
+  for (const e of payload.expenseRows) {
+    rows.push([
+      e.date,
+      e.category,
+      e.subcategory,
+      e.item,
+      { value: isNum(e.amount), numFmt: MONEY },
+      e.note,
+    ]);
+  }
+
+  const charts = [
+    {
+      type: 'doughnut' as const,
+      title: 'Расходы по категориям',
+      points: payload.expenseByCategory.map((c) => ({
+        label: c.name,
+        value: isNum(c.total),
+        color: c.color || '#888888',
+      })),
+      anchor: { fromCol: 6, fromRow: 1, toCol: 14, toRow: 20 },
+    },
+    {
+      type: 'doughnut' as const,
+      title: 'Приход по категориям',
+      points: payload.depositByCategory.map((c) => ({
+        label: c.name,
+        value: isNum(c.total),
+        color: c.color || '#888888',
+      })),
+      anchor: { fromCol: 6, fromRow: 22, toCol: 14, toRow: 41 },
+    },
+    {
+      type: 'bar' as const,
+      title: 'Динамика по дням',
+      series: [
+        {
+          name: 'Траты',
+          color: '#ff4757',
+          points: payload.byDay.map((d) => ({ label: d.label, value: isNum(d.expense) })),
+        },
+        {
+          name: 'Внесения',
+          color: '#00d4aa',
+          points: payload.byDay.map((d) => ({ label: d.label, value: isNum(d.deposit) })),
+        },
+      ],
+      points: [],
+      anchor: { fromCol: 6, fromRow: 43, toCol: 14, toRow: 62 },
+    },
+  ].filter((c) => (c.type === 'bar' ? true : c.points.length > 0));
+
+  const buf = await buildXlsx([
+    {
+      name: 'Отчёт',
+      columns: [{ width: 30 }, { width: 20 }, { width: 18 }, { width: 18 }, { width: 16 }, { width: 28 }],
+      rows,
+      charts,
+    },
+  ]);
+
+  const fs = await import('fs');
+  fs.writeFileSync(filePath, buf);
+  return { success: true, path: filePath };
 });
 
 ipcMain.handle('dialog:saveFile', async (_, defaultPath: string, content: string) => {

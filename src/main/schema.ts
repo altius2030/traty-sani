@@ -73,6 +73,8 @@ export const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS deposit_categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    -- Цвет сектора на графике «Приход по категориям»
+    color TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0
   );
 
@@ -424,6 +426,27 @@ export function applySchema(database: Database): void {
 
   // Комментарии внесений становятся справочником категорий.
   migrateDepositNotesToCategories(database);
+
+  // Миграция 1.0.9: свой цвет у категории внесения (для графика прихода).
+  const depositCols = database.prepare('PRAGMA table_info(deposit_categories)').all() as {
+    name: string;
+  }[];
+  if (!depositCols.some((c) => c.name === 'color')) {
+    database.exec(`ALTER TABLE deposit_categories ADD COLUMN color TEXT`);
+    console.log('[schema] Добавлена колонка deposit_categories.color');
+  }
+
+  // Раздаём цвета: сначала из палитры по порядку, чтобы соседние категории
+  // на графике не совпали по оттенку. Существующие выборы не трогаем.
+  const uncategorizedDeposits = database
+    .prepare(
+      `SELECT id FROM deposit_categories WHERE color IS NULL OR color = '' ORDER BY sort_order, id`
+    )
+    .all() as { id: number }[];
+  const setDepositColor = database.prepare(`UPDATE deposit_categories SET color = ? WHERE id = ?`);
+  uncategorizedDeposits.forEach((row, i) => {
+    setDepositColor.run(CATEGORY_COLORS[i % CATEGORY_COLORS.length], row.id);
+  });
 
   // Создаётся после миграции: на старой БД колонки category_id до неё нет.
   database.exec(`

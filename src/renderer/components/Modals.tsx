@@ -505,6 +505,7 @@ interface AddCategoryModalProps {
   onDeleteSubitem: (id: number) => void;
   onAddDepositCategory: (name: string) => Promise<{ id: number; name: string }>;
   onDeleteDepositCategory: (id: number) => void;
+  onSetDepositColor: (id: number, color: string | null) => void;
 }
 
 export function CategoryManagerModal({
@@ -521,6 +522,7 @@ export function CategoryManagerModal({
   onDeleteSubitem,
   onAddDepositCategory,
   onDeleteDepositCategory,
+  onSetDepositColor,
 }: AddCategoryModalProps) {
   const [newCategory, setNewCategory] = useState('');
   const [newSubcategory, setNewSubcategory] = useState<Record<number, string>>({});
@@ -528,6 +530,7 @@ export function CategoryManagerModal({
   const [newDepositCategory, setNewDepositCategory] = useState('');
   const [iconPickerFor, setIconPickerFor] = useState<number | null>(null);
   const [colorPickerFor, setColorPickerFor] = useState<number | null>(null);
+  const [depositColorFor, setDepositColorFor] = useState<number | null>(null);
 
   const handleAddCategory = (e: React.FormEvent) => {
     e.preventDefault();
@@ -833,6 +836,18 @@ export function CategoryManagerModal({
           )}
           {depositCategories.map((c) => (
             <div key={c.id} className="manage-row">
+              <button
+                className="icon-pick-btn"
+                onClick={() =>
+                  setDepositColorFor(depositColorFor === c.id ? null : c.id)
+                }
+                title="Выбрать цвет для графика прихода"
+                aria-label={`Цвет категории внесения ${c.name}`}
+                style={{
+                  background: c.color || 'var(--bg-card)',
+                  borderColor: c.color ? c.color : 'var(--border-color)',
+                }}
+              />
               <span className="manage-name">{c.name}</span>
               <span className="manage-count">
                 {c.deposits_count ?? 0} внес.
@@ -848,6 +863,24 @@ export function CategoryManagerModal({
               >
                 <Trash2 size={14} color="var(--accent-danger)" />
               </button>
+
+              {depositColorFor === c.id && (
+                <div className="color-picker deposit-color-picker">
+                  {CHART_COLORS.map((col) => (
+                    <button
+                      key={col}
+                      className={`color-swatch ${c.color === col ? 'active' : ''}`}
+                      style={{ background: col }}
+                      onClick={() => {
+                        onSetDepositColor(c.id, col);
+                        setDepositColorFor(null);
+                      }}
+                      title={col}
+                      aria-label={`Цвет ${col}`}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
 

@@ -55,6 +55,8 @@ export interface BalanceRecord {
 export interface DepositCategory {
   id: number;
   name: string;
+  /** Цвет сектора на графике прихода */
+  color: string | null;
   sort_order: number;
   /** Сколько внесений ссылается на категорию */
   deposits_count?: number;
@@ -90,7 +92,7 @@ export interface Report {
   deposits: Deposit[];
   byCategory: Record<string, CategoryBreakdown>;
   /** Внесения, сгруппированные по категориям внесений */
-  byDepositCategory: Record<string, number>;
+  byDepositCategory: Record<string, { total: number; color: string | null }>;
   period: { startDate: string; endDate: string };
 }
 

@@ -40,6 +40,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDepositCategories: () => ipcRenderer.invoke('db:getDepositCategories'),
   addDepositCategory: (name: string) => ipcRenderer.invoke('db:addDepositCategory', name),
   deleteDepositCategory: (id: number) => ipcRenderer.invoke('db:deleteDepositCategory', id),
+  setDepositCategoryColor: (id: number, color: string | null) =>
+    ipcRenderer.invoke('db:setDepositCategoryColor', id, color),
+  exportReportXlsx: (payload: any) => ipcRenderer.invoke('report:exportXlsx', payload),
   
   getReport: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getReport', { startDate, endDate }),
   saveFile: (defaultPath: string, content: string) => ipcRenderer.invoke('dialog:saveFile', defaultPath, content),

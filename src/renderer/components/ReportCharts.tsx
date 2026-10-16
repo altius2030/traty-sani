@@ -1,6 +1,6 @@
 import type { Report } from '../types';
 import { formatMoney } from '../lib/format';
-import { pickChartColor } from '../lib/icons';
+import { depositColorMap, expenseColorMap } from '../lib/reportColors';
 
 /**
  * Графики для отчёта. Сделаны на голом SVG, без внешних библиотек:
@@ -15,7 +15,17 @@ interface Slice {
 }
 
 /** Кольцевая диаграмма расходов по категориям */
-function DonutChart({ data, total }: { data: Slice[]; total: number }) {
+function DonutChart({
+  data,
+  total,
+  centerLabel = 'Всего',
+  emptyLabel = 'Нет расходов за период',
+}: {
+  data: Slice[];
+  total: number;
+  centerLabel?: string;
+  emptyLabel?: string;
+}) {
   const size = 200;
   const stroke = 34;
   const gap = 2; // зазор между секторами в единицах длины дуги
@@ -23,9 +33,7 @@ function DonutChart({ data, total }: { data: Slice[]; total: number }) {
   const circumference = 2 * Math.PI * radius;
 
   if (data.length === 0 || total <= 0) {
-    return (
-      <div className="chart-empty">Нет расходов за период</div>
-    );
+    return <div className="chart-empty">{emptyLabel}</div>;
   }
 
   let offset = 0;
@@ -65,7 +73,7 @@ function DonutChart({ data, total }: { data: Slice[]; total: number }) {
           textAnchor="middle"
           className="chart-center-label"
         >
-          Всего
+          {centerLabel}
         </text>
         <text x={size / 2} y={size / 2 + 20} textAnchor="middle" className="chart-center-value">
           {formatMoney(total)}
@@ -124,15 +132,30 @@ function BarChart({ data }: { data: { label: string; expense: number; deposit: n
 }
 
 export default function ReportCharts({ report }: { report: Report }) {
-  // Цвет — тот, что пользователь выбрал для категории; если не выбран,
-  // берём из палитры по позиции. Плюс рисуем разделительную тёмную линию,
-  // иначе соседние сектора с похожим тоном визуально сливаются.
-  const slices: Slice[] = Object.entries(report.byCategory)
-    .map(([label, v]) => ({ label, value: v.total, color: '', chosen: v.color }))
-    .sort((a, b) => b.value - a.value)
-    .map((s, i) => ({ ...s, color: pickChartColor(i, s.chosen) }));
+  // Цвета раздаёт общий модуль: те же оттенки показываются в точках таблиц
+  // отчёта, иначе данные выглядели бы неоднозначно.
+  const expenseColors = expenseColorMap(report);
+  const expenseEntries = Object.entries(report.byCategory)
+    .map(([label, v]) => ({ label, value: v.total }))
+    .sort((a, b) => b.value - a.value);
+  const slices: Slice[] = expenseEntries.map((e) => ({
+    ...e,
+    color: expenseColors[e.label],
+  }));
 
   const total = slices.reduce((s, x) => s + x.value, 0);
+
+  // Приход по категориям внесений. Цвета берём из настроек категорий
+  // внесений — те же, что показывает кольцо расходов, но свой справочник.
+  const incomeColors = depositColorMap(report);
+  const incomeEntries = Object.entries(report.byDepositCategory || {})
+    .map(([label, v]) => ({ label, value: v.total }))
+    .sort((a, b) => b.value - a.value);
+  const incomeSlices: Slice[] = incomeEntries.map((e) => ({
+    ...e,
+    color: incomeColors[e.label],
+  }));
+  const incomeTotal = incomeSlices.reduce((s, x) => s + x.value, 0);
 
   // Группируем операции по дням
   const byDay = new Map<string, { expense: number; deposit: number }>();
@@ -155,7 +178,7 @@ export default function ReportCharts({ report }: { report: Report }) {
       deposit: v.deposit,
     }));
 
-  if (slices.length === 0 && days.length === 0) {
+  if (slices.length === 0 && incomeSlices.length === 0 && days.length === 0) {
     return null;
   }
 
@@ -165,6 +188,18 @@ export default function ReportCharts({ report }: { report: Report }) {
         <div className="chart-card">
           <div className="breakdown-title">Расходы по категориям</div>
           <DonutChart data={slices} total={total} />
+        </div>
+      )}
+
+      {incomeSlices.length > 0 && (
+        <div className="chart-card">
+          <div className="breakdown-title">Приход по категориям</div>
+          <DonutChart
+            data={incomeSlices}
+            total={incomeTotal}
+            centerLabel="Приход"
+            emptyLabel="Нет внесений за период"
+          />
         </div>
       )}
 
@@ -201,6 +236,18 @@ export function buildChartCsv(report: Report): string[] {
     lines.push(`${name};${data.total.toFixed(2)};${share}`);
   }
 
+  const incomeEntries = Object.entries(report.byDepositCategory || {});
+  if (incomeEntries.length > 0) {
+    const incomeTotal = incomeEntries.reduce((s, [, v]) => s + v.total, 0);
+    lines.push('');
+    lines.push('ГРАФИК 2: приход по категориям');
+    lines.push('Категория;Сумма;Доля,%');
+    for (const [name, data] of incomeEntries) {
+      const share = incomeTotal > 0 ? ((data.total / incomeTotal) * 100).toFixed(1) : '0.0';
+      lines.push(`${name};${data.total.toFixed(2)};${share}`);
+    }
+  }
+
   const byDay = new Map<string, { expense: number; deposit: number }>();
   for (const e of report.expenses) {
     const cur = byDay.get(e.date) || { expense: 0, deposit: 0 };
@@ -215,7 +262,7 @@ export function buildChartCsv(report: Report): string[] {
 
   if (byDay.size > 0) {
     lines.push('');
-    lines.push('ГРАФИК 2: динамика по дням');
+    lines.push(`ГРАФИК ${incomeEntries.length > 0 ? 3 : 2}: динамика по дням`);
     lines.push('Дата;Траты;Внесения;Итого');
     for (const [date, v] of [...byDay.entries()].sort()) {
       lines.push(`${date};${v.expense.toFixed(2)};${v.deposit.toFixed(2)};${(v.deposit - v.expense).toFixed(2)}`);

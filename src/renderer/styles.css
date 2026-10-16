@@ -1041,6 +1041,18 @@ input::placeholder {
   text-align: right;
 }
 
+/* Палитра цветов под строкой справочника внесений */
+.deposit-color-picker {
+  flex-basis: 100%;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.manage-row {
+  flex-wrap: wrap;
+}
+
 /* Разделитель и заголовок секций внутри модальных окон */
 .section-divider {
   height: 1px;
@@ -1314,6 +1326,46 @@ input::placeholder {
 .deposit-total-sum {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/* Итоговый блок внизу отчёта */
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+.summary-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.summary-value {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-value.income {
+  color: var(--accent-primary);
+}
+
+.summary-total-row td {
+  border-top: 1px solid var(--border-color);
+  padding-top: 10px;
 }
 
 .export-btn {

@@ -9,6 +9,7 @@ import AddExpenseModal, {
 } from './components/Modals';
 import ReportModal from './components/ReportModal';
 import { buildChartCsv } from './components/ReportCharts';
+import { depositColorMap, expenseColorMap } from './lib/reportColors';
 import ToastContainer from './components/ToastContainer';
 import type {
   DepositCategory,
@@ -24,6 +25,7 @@ import type {
 import type { MainTab } from './components/ExpenseTable';
 import {
   formatMoney,
+  getPeriodLabel,
   getPresetPeriod,
   parseCategoriesSubcategories,
 } from './lib/format';
@@ -390,8 +392,8 @@ function App() {
     lines.push('');
     lines.push('Внесения по категориям:');
     lines.push('Категория;Сумма');
-    for (const [cat, total] of Object.entries(rep.byDepositCategory || {})) {
-      lines.push(`${cat.replace(/;/g, ',')};${total.toFixed(2)}`);
+    for (const [cat, data] of Object.entries(rep.byDepositCategory || {})) {
+      lines.push(`${cat.replace(/;/g, ',')};${data.total.toFixed(2)}`);
     }
     lines.push('');
     lines.push('Расходы по категориям:');
@@ -439,6 +441,83 @@ function App() {
       URL.revokeObjectURL(url);
       addToast('Отчёт скачан');
     }
+  };
+
+  // ——— Экспорт в Excel с нативными графиками ———
+  const handleExportXlsx = async (rep: Report, p: Period) => {
+    try {
+      const byDayMap = new Map<string, { label: string; expense: number; deposit: number }>();
+      for (const e of rep.expenses) {
+        const label = new Date(e.date).toLocaleDateString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+        });
+        const cur = byDayMap.get(e.date) || { label, expense: 0, deposit: 0 };
+        cur.expense += e.amount;
+        byDayMap.set(e.date, cur);
+      }
+      for (const d of rep.deposits) {
+        const label = new Date(d.date).toLocaleDateString('ru-RU', {
+          day: '2-digit',
+          month: '2-digit',
+        });
+        const cur = byDayMap.get(d.date) || { label, expense: 0, deposit: 0 };
+        cur.deposit += d.amount;
+        byDayMap.set(d.date, cur);
+      }
+
+      // Цвета для графиков Excel — те же, что в интерфейсе. Иначе категории без
+      // выбранного цвета попали бы в файл серым, хотя на кольце отчёта они
+      // окрашены палитрой.
+      const expenseColors = expenseColorMap(rep);
+      const depositColors = depositColorMap(rep);
+
+      const result = await window.electronAPI.exportReportXlsx({
+        title: `Отчёт: ${getPeriodLabel(p)}`,
+        period: `${p.startDate} — ${p.endDate}`,
+        startBalance: rep.startBalance,
+        totalDeposits: rep.totalDeposits,
+        totalExpenses: rep.totalExpenses,
+        endBalance: rep.endBalance,
+        checkpoint: rep.baseCheckpoint,
+        expenseRows: rep.expenses.map((e) => ({
+          date: e.date,
+          category: e.category_name,
+          subcategory: e.subcategory_name || '',
+          item: e.subitem_name || '',
+          amount: e.amount,
+          note: e.note || '',
+        })),
+        depositRows: rep.deposits.map((d) => ({
+          date: d.date,
+          category: d.category_name || 'Без категории',
+          amount: d.amount,
+        })),
+        expenseByCategory: Object.entries(rep.byCategory).map(([name, data]) => ({
+          name,
+          total: data.total,
+          color: expenseColors[name],
+        })),
+        depositByCategory: Object.entries(rep.byDepositCategory || {}).map(
+          ([name, data]) => ({ name, total: data.total, color: depositColors[name] })
+        ),
+        byDay: [...byDayMap.values()].sort((a, b) => (a.label < b.label ? -1 : 1)),
+      });
+
+      if (result.success) addToast('Отчёт сохранён в Excel');
+      else if (result.path) addToast('Отчёт сохранён');
+    } catch (err) {
+      addToast(
+        err instanceof Error ? err.message : 'Не удалось сохранить отчёт в Excel',
+        'error'
+      );
+    }
+  };
+
+  /** Смена цвета категории внесения — влияет на кольцо прихода и на Excel */
+  const handleSetDepositColor = async (id: number, color: string | null) => {
+    await window.electronAPI.setDepositCategoryColor(id, color);
+    await loadDepositCategories();
   };
 
   // ——— Рендер ———
@@ -533,11 +612,17 @@ function App() {
           depositCategories={depositCategories}
           onAddDepositCategory={handleAddDepositCategory}
           onDeleteDepositCategory={handleDeleteDepositCategory}
+          onSetDepositColor={handleSetDepositColor}
         />
       )}
 
       {modal?.type === 'report' && (
-        <ReportModal period={period} onClose={() => setModal(null)} onExport={handleExport} />
+        <ReportModal
+          period={period}
+          onClose={() => setModal(null)}
+          onExport={handleExport}
+          onExportXlsx={handleExportXlsx}
+        />
       )}
 
       {confirmDelete && (

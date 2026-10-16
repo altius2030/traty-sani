@@ -44,6 +44,8 @@ export interface ElectronAPI {
   getDepositCategories(): Promise<DepositCategory[]>;
   addDepositCategory(name: string): Promise<{ id: number; name: string }>;
   deleteDepositCategory(id: number): Promise<{ success: boolean }>;
+  setDepositCategoryColor(id: number, color: string | null): Promise<{ success: boolean }>;
+  exportReportXlsx(payload: any): Promise<{ success: boolean; path?: string }>;
   getReport(startDate: string, endDate: string): Promise<any>;
   saveFile(
     defaultPath: string,

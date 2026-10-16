@@ -1,7 +1,7 @@
 {
   "name": "traty-sani",
   "productName": "Траты Сани",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Траты Сани: учёт расходов, внесений, остатка и отчёты за период",
   "main": "dist/main/main.js",
   "author": "Траты Сани",
@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
@@ -66,12 +67,22 @@
     ],
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "mac": {
       "target": [
-        { "target": "dmg", "arch": ["arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
       ],
       "category": "public.app-category.finance",
       "darkModeSupport": true,
