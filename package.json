@@ -1,7 +1,7 @@
 {
   "name": "traty-sani",
   "productName": "Траты Сани",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Траты Сани: учёт расходов, внесений, остатка и отчёты за период",
   "main": "dist/main/main.js",
   "author": "Траты Сани",
@@ -118,6 +118,9 @@
     "dmg": {
       "title": "Траты Сани ${version}",
       "artifactName": "Traty-Sani-${version}-arm64.${ext}"
+    },
+    "zip": {
+      "artifactName": "Traty-Sani-${version}-arm64-mac.${ext}"
     },
     "nsis": {
       "oneClick": false,

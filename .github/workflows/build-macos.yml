@@ -74,7 +74,25 @@ jobs:
             -s -k "$PASS" "$KEYCHAIN" > /dev/null
           rm -f "$RUNNER_TEMP/key.p12"
 
-          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | sed -n 's/.*"\(.*\)"/\1/p' | head -1)
+          # Ключевой момент. `security find-identity -v` показывает только
+          # ДОВЕРЕННЫЕ сертификаты, а electron-builder проверяет подпись тем
+          # же способом. Пока сертификат не помечен доверенным, он молча
+          # отбрасывается: подпись пропускается, идентификатор оказывается
+          # пустым, и на выходе получается ad-hoc сборка без отметки.
+          security find-certificate -a -p "$KEYCHAIN" > "$RUNNER_TEMP/cert.pem"
+          security add-trusted-cert -r trustRoot -k "$KEYCHAIN" "$RUNNER_TEMP/cert.pem"
+          rm -f "$RUNNER_TEMP/cert.pem"
+
+          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | sed -n 's/.*"\(.*\)"/\1/p' | head -1)
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::Сертификат импортирован, но macOS не считает его"\
+              "доверенным. Проверьте, что пароль в MAC_CSC_PASSWORD верный"\
+              "и сертификат создан как самоподписанный."
+            security find-identity -v -p codesigning "$KEYCHAIN" || true
+            exit 1
+          fi
+
           echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
           echo "signed=true" >> "$GITHUB_OUTPUT"
           echo "Сертификат: $IDENTITY"
