@@ -1,5 +1,30 @@
 import type { DepositCategory } from './types';
 
+export type UpdateState =
+  | 'idle'
+  | 'checking'
+  | 'available'
+  | 'not-available'
+  | 'downloading'
+  | 'downloaded'
+  | 'error';
+
+export interface UpdateStatus {
+  state: UpdateState;
+  percent?: number;
+  transferred?: number;
+  total?: number;
+  version?: string;
+  message?: string;
+  /** Можно ли обновиться прямо сейчас на этой платформе */
+  canInstall: boolean;
+  downloadUrl?: string;
+  /** Ссылка на страницу релиза, приходит из главного процесса */
+  releaseUrl?: string;
+  /** Есть ли у сборки устойчивая подпись (важно для macOS) */
+  signed?: boolean;
+}
+
 export interface ElectronAPI {
   /** 'win32' | 'darwin' | 'linux' */
   readonly platform: string;
@@ -46,6 +71,12 @@ export interface ElectronAPI {
   deleteDepositCategory(id: number): Promise<{ success: boolean }>;
   setDepositCategoryColor(id: number, color: string | null): Promise<{ success: boolean }>;
   exportReportXlsx(payload: any): Promise<{ success: boolean; path?: string }>;
+  checkUpdate(): Promise<UpdateStatus>;
+  downloadUpdate(): Promise<UpdateStatus>;
+  installUpdate(): Promise<{ success: boolean; message?: string }>;
+  getUpdateStatus(): Promise<UpdateStatus>;
+  openReleasePage(): Promise<{ success: boolean }>;
+  onUpdateStatus(cb: (status: UpdateStatus) => void): () => void;
   getReport(startDate: string, endDate: string): Promise<any>;
   saveFile(
     defaultPath: string,

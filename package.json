@@ -1,7 +1,7 @@
 {
   "name": "traty-sani",
   "productName": "Траты Сани",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Траты Сани: учёт расходов, внесений, остатка и отчёты за период",
   "main": "dist/main/main.js",
   "author": "Траты Сани",
@@ -16,6 +16,8 @@
     "build:template-db": "electron scripts/build-template-db.js",
     "prebuild:win": "npm run build && npm run build:template-db",
     "build:win": "electron-builder --win --x64",
+    "release:win": "npm run build && npm run build:template-db && electron-builder --win --x64 --publish always",
+    "release:mac": "npm run build && npm run build:template-db && electron-builder --mac --arm64 --publish always",
     "build:portable": "npm run build && npm run build:template-db && electron-builder --win portable --x64",
     "prebuild:mac": "npm run build && npm run build:template-db",
     "build:mac": "electron-builder --mac --arm64",
@@ -24,6 +26,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
+    "electron-updater": "^6.8.9",
     "jszip": "^3.10.1"
   },
   "devDependencies": {
@@ -65,6 +68,23 @@
     "asarUnpack": [
       "**/node_modules/better-sqlite3/**"
     ],
+    "afterPack": "scripts/after-pack.js",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "altius2030",
+      "repo": "traty-sani",
+      "releaseType": "release"
+    },
     "win": {
       "target": [
         {
@@ -82,12 +102,17 @@
           "arch": [
             "arm64"
           ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.finance",
       "darkModeSupport": true,
-      "gatekeeperAssess": false,
-      "identity": null
+      "gatekeeperAssess": false
     },
     "dmg": {
       "title": "Траты Сани ${version}",

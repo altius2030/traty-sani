@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, Plus, Trash2, Banknote } from 'lucide-react';
-import type { Category, Subcategory, Subitem, DepositCategory } from '../types';
+import {
+  X,
+  Plus,
+  Trash2,
+  Banknote,
+  Download,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+} from 'lucide-react';
+import type {
+  Category,
+  Subcategory,
+  Subitem,
+  DepositCategory,
+  UpdateStatus,
+} from '../types';
 import { toISODate } from '../lib/format';
 import { CATEGORY_ICONS, getCategoryIcon, CHART_COLORS } from '../lib/icons';
 
@@ -486,6 +501,140 @@ export function AddBalanceModal({ onClose, onSubmit }: AddBalanceModalProps) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+/** Окно проверки и установки обновления */
+export function UpdateModal({
+  status,
+  currentVersion,
+  onCheck,
+  onInstall,
+  onOpenReleases,
+  onClose,
+}: {
+  status: UpdateStatus;
+  currentVersion: string;
+  onCheck: () => void;
+  onInstall: () => void;
+  onOpenReleases: () => void;
+  onClose: () => void;
+}) {
+  const busy = status.state === 'checking' || status.state === 'downloading';
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal update-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Обновление программы</h2>
+          <button className="modal-close" onClick={onClose} aria-label="Закрыть">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="update-body">
+          <div className="update-current">
+            Установленная версия: <strong>v{currentVersion}</strong>
+          </div>
+
+          {status.state === 'idle' && (
+            <div className="field-hint">
+              Нажмите «Проверить обновление», чтобы узнать, есть ли новая версия.
+            </div>
+          )}
+
+          {status.state === 'checking' && (
+            <div className="update-status">
+              <RefreshCw size={16} className="spin" />
+              <span>{status.message || 'Проверяю обновления…'}</span>
+            </div>
+          )}
+
+          {status.state === 'not-available' && (
+            <div className="update-status ok">
+              <CheckCircle2 size={16} />
+              <span>{status.message || 'Установлена последняя версия'}</span>
+            </div>
+          )}
+
+          {status.state === 'available' && (
+            <div className="update-status">
+              <Download size={16} />
+              <span>
+                Доступна версия <strong>{status.version}</strong>
+              </span>
+            </div>
+          )}
+
+          {status.state === 'downloading' && (
+            <div className="update-download">
+              <div className="progress-track">
+                <div className="progress-fill" style={{ width: `${status.percent ?? 0}%` }} />
+              </div>
+              <div className="progress-label">Загружаю… {status.percent ?? 0}%</div>
+            </div>
+          )}
+
+          {status.state === 'downloaded' && (
+            <div className="update-status ok">
+              <CheckCircle2 size={16} />
+              <span>
+                Версия {status.version} загружена и готова к установке
+              </span>
+            </div>
+          )}
+
+          {status.state === 'error' && (
+            <div className="update-status error">
+              <AlertCircle size={16} />
+              <span>{status.message}</span>
+            </div>
+          )}
+
+          {status.canInstall === false && (
+            <div className="update-note">
+              На этой платформе автоустановка недоступна: обновление нужно
+              поставить вручную, заменив программу в папке «Программы».
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          <button
+            className="btn btn-ghost"
+            onClick={onOpenReleases}
+            title="Открыть страницу релизов в браузере"
+          >
+            Страница релизов
+          </button>
+          <div style={{ flex: 1 }} />
+          {status.state === 'downloaded' ? (
+            <button
+              className="btn btn-primary"
+              onClick={onInstall}
+              disabled={!status.canInstall}
+              title={
+                status.canInstall
+                  ? 'Программа закроется, обновится и запустится заново'
+                  : 'Автоустановка на этой платформе недоступна'
+              }
+            >
+              <RefreshCw size={16} />
+              Установить и перезапустить
+            </button>
+          ) : (
+            <button className="btn btn-primary" onClick={onCheck} disabled={busy}>
+              {status.state === 'checking' ? (
+                <RefreshCw size={16} className="spin" />
+              ) : (
+                <Download size={16} />
+              )}
+              {status.state === 'checking' ? 'Проверяю…' : 'Проверить обновление'}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

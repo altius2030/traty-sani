@@ -72,6 +72,27 @@ export interface Deposit {
   created_at?: string;
 }
 
+export interface UpdateStatus {
+  state:
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'not-available'
+    | 'downloading'
+    | 'downloaded'
+    | 'error';
+  /** Процент загрузки 0–100 */
+  percent?: number;
+  version?: string;
+  message?: string;
+  /** Можно ли обновиться прямо сейчас на этой платформе */
+  canInstall: boolean;
+  downloadUrl?: string;
+  releaseUrl?: string;
+  /** Есть ли у сборки устойчивая подпись — важно для macOS */
+  signed?: boolean;
+}
+
 export interface CategoryBreakdown {
   total: number;
   /** Цвет категории, выбранный пользователем */

@@ -46,6 +46,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   getReport: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getReport', { startDate, endDate }),
   saveFile: (defaultPath: string, content: string) => ipcRenderer.invoke('dialog:saveFile', defaultPath, content),
+
+  // ——— Обновление приложения ———
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  downloadUpdate: () => ipcRenderer.invoke('update:download'),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  getUpdateStatus: () => ipcRenderer.invoke('update:status'),
+  openReleasePage: () => ipcRenderer.invoke('update:openReleasePage'),
+  // Главный процесс шлёт состояние обновления при каждом изменении
+  onUpdateStatus: (cb: (status: any) => void) => {
+    const listener = (_: unknown, status: unknown) => cb(status);
+    ipcRenderer.on('update:status', listener);
+    return () => ipcRenderer.removeListener('update:status', listener);
+  },
 });
 
 declare global {

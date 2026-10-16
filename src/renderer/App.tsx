@@ -6,6 +6,7 @@ import AddExpenseModal, {
   AddDepositModal,
   CategoryManagerModal,
   ConfirmModal,
+  UpdateModal,
 } from './components/Modals';
 import ReportModal from './components/ReportModal';
 import { buildChartCsv } from './components/ReportCharts';
@@ -21,6 +22,7 @@ import type {
   Report,
   Toast,
   ToastType,
+  UpdateStatus,
 } from './types';
 import type { MainTab } from './components/ExpenseTable';
 import {
@@ -76,12 +78,17 @@ function App() {
   const [selectedSubitemId, setSelectedSubitemId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>({
+    state: 'idle',
+    canInstall: true,
+  });
   const [modal, setModal] = useState<
     | { type: 'expense'; categoryId?: number; subcategoryId?: number; subitemId?: number }
     | { type: 'deposit' }
     | { type: 'balance' }
     | { type: 'categories' }
     | { type: 'report' }
+    | { type: 'update' }
     | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<
@@ -155,6 +162,15 @@ function App() {
   useEffect(() => {
     loadExpenses(period).catch(() => {});
   }, [period, loadExpenses]);
+
+  // Состояние обновления приходит из главного процесса: загрузка идёт там,
+  // а окно могло перерисоваться или сменить период.
+  useEffect(() => {
+    if (!window.electronAPI.onUpdateStatus) return;
+    const off = window.electronAPI.onUpdateStatus(setUpdateStatus);
+    window.electronAPI.getUpdateStatus?.().then(setUpdateStatus).catch(() => {});
+    return off;
+  }, []);
 
   const totalExpenses = useMemo(
     () => expenses.reduce((sum, e) => sum + e.amount, 0),
@@ -520,7 +536,43 @@ function App() {
     await loadDepositCategories();
   };
 
-  // ——— Рендер ———
+  // ——— Обновление программы ———
+const handleCheckUpdate = async () => {
+  try {
+    const status = await window.electronAPI.checkUpdate();
+    setUpdateStatus(status);
+    // Найдена новая версия — сразу качаем, как и ожидается от кнопки
+    if (status.state === 'available') {
+      await window.electronAPI.downloadUpdate();
+    }
+  } catch (err) {
+    addToast(
+      err instanceof Error ? err.message : 'Не удалось проверить обновление',
+      'error'
+    );
+  }
+};
+
+const handleInstallUpdate = async () => {
+  try {
+    const result = await window.electronAPI.installUpdate();
+    if (!result.success && result.message) {
+      addToast(result.message, 'error');
+    }
+    // При успехе программа закрывается — закрывать окно вручную не нужно
+  } catch (err) {
+    addToast(
+      err instanceof Error ? err.message : 'Не удалось установить обновление',
+      'error'
+    );
+  }
+};
+
+const handleOpenReleases = async () => {
+  await window.electronAPI.openReleasePage();
+};
+
+// ——— Рендер ———
   return (
     <div className="app" data-platform={window.electronAPI.platform}>
       {/* Панель заголовка: перетаскивание окна + отступ под системные кнопки */}
@@ -550,6 +602,7 @@ function App() {
           onMakeBackup={handleMakeBackup}
           onDeleteCategory={(id) => askDelete('category', id)}
           onDeleteSubcategory={(id) => askDelete('subcategory', id)}
+          onCheckUpdate={() => setModal({ type: 'update' })}
         />
 
         <ExpenseTable
@@ -622,6 +675,17 @@ function App() {
           onClose={() => setModal(null)}
           onExport={handleExport}
           onExportXlsx={handleExportXlsx}
+        />
+      )}
+
+      {modal?.type === 'update' && (
+        <UpdateModal
+          status={updateStatus}
+          currentVersion={__APP_VERSION__}
+          onCheck={handleCheckUpdate}
+          onInstall={handleInstallUpdate}
+          onOpenReleases={handleOpenReleases}
+          onClose={() => setModal(null)}
         />
       )}
 

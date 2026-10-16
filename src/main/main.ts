@@ -1,4 +1,4 @@
-﻿import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+﻿import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import { join } from 'path';
 import {
   existsSync,
@@ -10,6 +10,15 @@ import {
 } from 'fs';
 import Database from 'better-sqlite3';
 import { applySchema } from './schema';
+import {
+  checkForUpdates,
+  downloadUpdate,
+  getUpdateStatus,
+  installUpdate,
+  onUpdateStatus,
+  RELEASE_URL,
+  hasStableSignature,
+} from './updater';
 
 /** Данные для экспорта отчёта в Excel — собираются в интерфейсе */
 interface ReportXlsxPayload {
@@ -185,6 +194,9 @@ function createWindow() {
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
   }
+
+  // Обновление могло начаться до готовности окна — привязываем отправку статуса
+  pushUpdateStatus(mainWindow);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -888,6 +900,42 @@ ipcMain.handle('report:exportXlsx', async (_, payload: ReportXlsxPayload) => {
   const fs = await import('fs');
   fs.writeFileSync(filePath, buf);
   return { success: true, path: filePath };
+});
+
+// ——— Обновление приложения ———
+/**
+ * Состояние обновления дублируется в окно при каждом изменении: загрузка
+ * идёт в главном процессе, а окно могло перерисоваться или обновить период.
+ */
+function pushUpdateStatus(target: Electron.BrowserWindow | null): void {
+  onUpdateStatus((status) => {
+    if (target && !target.isDestroyed()) {
+      target.webContents.send('update:status', status);
+    }
+  });
+}
+
+ipcMain.handle('update:check', async () => {
+  return checkForUpdates();
+});
+
+ipcMain.handle('update:download', async () => {
+  return downloadUpdate();
+});
+
+ipcMain.handle('update:install', async () => {
+  return installUpdate();
+});
+
+ipcMain.handle('update:status', () => ({
+  ...getUpdateStatus(),
+  releaseUrl: RELEASE_URL,
+  signed: hasStableSignature(),
+}));
+
+ipcMain.handle('update:openReleasePage', async () => {
+  await shell.openExternal(RELEASE_URL);
+  return { success: true };
 });
 
 ipcMain.handle('dialog:saveFile', async (_, defaultPath: string, content: string) => {
