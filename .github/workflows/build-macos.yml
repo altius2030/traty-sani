@@ -120,11 +120,14 @@ jobs:
           [ -n "$(ls release/*.zip 2>/dev/null)" ] || { echo "нет .zip — автообновление сломается"; exit 1; }
 
       # Режим без сертификата: подпись ad-hoc + ручная сборка образа.
+      # Идентификатор подписи отключается флагом -c.mac.identity=null: в
+      # общем конфиге identity не задан, иначе electron-builder требует
+      # сертификат и падает там, где его быть не может.
       - name: Сборка без сертификата (ad-hoc)
         if: steps.cert.outputs.signed != 'true'
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run build:mac
+        run: npm run build:mac:adhoc
 
       - name: Подпись бандла (ad-hoc)
         if: steps.cert.outputs.signed != 'true'

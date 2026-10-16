@@ -21,6 +21,7 @@
     "build:portable": "npm run build && npm run build:template-db && electron-builder --win portable --x64",
     "prebuild:mac": "npm run build && npm run build:template-db",
     "build:mac": "electron-builder --mac --arm64",
+    "build:mac:adhoc": "npm run build && npm run build:template-db && electron-builder --mac --arm64 -c.mac.identity=null",
     "start": "npm run build && electron .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
