@@ -8,6 +8,7 @@ import {
   RefreshCw,
   CheckCircle2,
   AlertCircle,
+  Info,
 } from 'lucide-react';
 import type {
   Category,
@@ -578,10 +579,15 @@ export function UpdateModal({
           )}
 
           {status.state === 'downloaded' && (
-            <div className="update-status ok">
-              <CheckCircle2 size={16} />
+            <div className={`update-status ${status.canInstall ? 'ok' : 'notice'}`}>
+              {status.canInstall ? (
+                <CheckCircle2 size={16} />
+              ) : (
+                <Info size={16} />
+              )}
               <span>
-                Версия {status.version} загружена и готова к установке
+                {status.message ||
+                  `Версия ${status.version} загружена и готова к установке`}
               </span>
             </div>
           )}

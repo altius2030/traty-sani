@@ -6,10 +6,7 @@ import {
   Settings,
   Plus,
   Trash2,
-  Wallet,
-  Save,
   ChevronDown,
-  RefreshCw,
 } from 'lucide-react';
 import type { Category, Subcategory, Subitem } from '../types';
 import { formatMoney } from '../lib/format';
@@ -28,11 +25,8 @@ interface SidebarProps {
   onAddExpense: (categoryId: number, subcategoryId?: number, subitemId?: number) => void;
   onDeleteSubitem: (id: number) => void;
   onOpenCategoryManager: () => void;
-  onOpenBalance: () => void;
-  onMakeBackup: () => void;
   onDeleteCategory: (id: number) => void;
   onDeleteSubcategory: (id: number) => void;
-  onCheckUpdate: () => void;
 }
 
 const WIDTH_KEY = 'traty-sidebar-width';
@@ -72,11 +66,8 @@ export default function Sidebar({
   onAddExpense,
   onDeleteSubitem,
   onOpenCategoryManager,
-  onOpenBalance,
-  onMakeBackup,
   onDeleteCategory,
   onDeleteSubcategory,
-  onCheckUpdate,
 }: SidebarProps) {
   // Раскрытая категория: плитка → выезжающий список её подкатегорий
   const [openId, setOpenId] = useState<number | null>(null);
@@ -358,18 +349,6 @@ export default function Sidebar({
             )}
           </div>
         </div>
-        <button className="add-btn" onClick={onOpenBalance} style={{ marginTop: 12 }}>
-          <Wallet size={16} />
-          Указать остаток
-        </button>
-        <button className="add-btn" onClick={onMakeBackup} style={{ marginTop: 8 }}>
-          <Save size={16} />
-          Резервная копия
-        </button>
-        <button className="add-btn" onClick={onCheckUpdate} style={{ marginTop: 8 }}>
-          <RefreshCw size={16} />
-          Проверить обновление
-        </button>
       </div>
     </aside>
   );

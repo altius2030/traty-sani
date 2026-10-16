@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Wallet, Save, RefreshCw } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import ExpenseTable from './components/ExpenseTable';
 import AddExpenseModal, {
@@ -82,6 +83,8 @@ function App() {
     state: 'idle',
     canInstall: true,
   });
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const fileMenuRef = useRef<HTMLDivElement>(null);
   const [modal, setModal] = useState<
     | { type: 'expense'; categoryId?: number; subcategoryId?: number; subitemId?: number }
     | { type: 'deposit' }
@@ -162,6 +165,27 @@ function App() {
   useEffect(() => {
     loadExpenses(period).catch(() => {});
   }, [period, loadExpenses]);
+
+  // Меню «Файл» закрывается по клику вне и по Escape. Проверка попадания
+  // внутрь нужна и для самой кнопки: иначе mousedown по ней закрыл бы меню,
+  // и следующий click тут же открыл бы его снова.
+  useEffect(() => {
+    if (!fileMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (fileMenuRef.current && !fileMenuRef.current.contains(e.target as Node)) {
+        setFileMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFileMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [fileMenuOpen]);
 
   // Состояние обновления приходит из главного процесса: загрузка идёт там,
   // а окно могло перерисоваться или сменить период.
@@ -575,8 +599,61 @@ const handleOpenReleases = async () => {
 // ——— Рендер ———
   return (
     <div className="app" data-platform={window.electronAPI.platform}>
-      {/* Панель заголовка: перетаскивание окна + отступ под системные кнопки */}
+      {/* Панель заголовка: меню «Файл» + перетаскивание окна */}
       <div className="drag-region">
+        <div className="file-menu" ref={fileMenuRef}>
+          <button
+            className={`file-menu-trigger ${fileMenuOpen ? 'open' : ''}`}
+            onClick={() => setFileMenuOpen((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={fileMenuOpen}
+          >
+            Файл
+          </button>
+
+          {fileMenuOpen && (
+            <div className="file-menu-dropdown" role="menu">
+              <button
+                className="file-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenuOpen(false);
+                  setModal({ type: 'balance' });
+                }}
+              >
+                <Wallet size={15} />
+                Указать остаток
+              </button>
+              <button
+                className="file-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenuOpen(false);
+                  handleMakeBackup();
+                }}
+              >
+                <Save size={15} />
+                Резервная копия
+              </button>
+              <div className="file-menu-separator" />
+              <button
+                className="file-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenuOpen(false);
+                  setModal({ type: 'update' });
+                }}
+              >
+                <RefreshCw size={15} />
+                Проверить обновление
+              </button>
+              <div className="file-menu-footer">
+                Траты Сани v{__APP_VERSION__}
+              </div>
+            </div>
+          )}
+        </div>
+
         <span className="drag-region-title">
           Траты Сани <span className="drag-region-version">v{__APP_VERSION__}</span>
         </span>
@@ -598,11 +675,8 @@ const handleOpenReleases = async () => {
             setModal({ type: 'expense', categoryId, subcategoryId, subitemId })
           }
           onOpenCategoryManager={() => setModal({ type: 'categories' })}
-          onOpenBalance={() => setModal({ type: 'balance' })}
-          onMakeBackup={handleMakeBackup}
           onDeleteCategory={(id) => askDelete('category', id)}
           onDeleteSubcategory={(id) => askDelete('subcategory', id)}
-          onCheckUpdate={() => setModal({ type: 'update' })}
         />
 
         <ExpenseTable

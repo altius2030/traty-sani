@@ -152,7 +152,7 @@ async function ensureUpdater(): Promise<UpdaterModule> {
   updater.on('error', (err: Error) => {
     setStatus({
       state: 'error',
-      message: err?.message || 'Не удалось проверить обновление',
+      message: humanizeUpdateError(err),
       // При ошибке оставляем ручной вариант: ссылка на релиз всегда доступна
       downloadUrl: RELEASE_PAGE,
     });
@@ -170,6 +170,53 @@ export function getUpdateStatus(): UpdateStatus {
   // Подпись не меняется за время работы программы, но проверить её здесь
   // дёшево и это снимает зависимость от того, как было собрано состояние
   return { ...current, canInstall: hasStableSignature() };
+}
+
+/**
+ * Переводит техническую ошибку обновления в текст для человека.
+ *
+ * Сырое сообщение electron-updater — это HTTP-заголовки, URL и стек-трейс
+ * на пол-экрана. Пользователю от этого ничто не становится понятнее, а
+ * «Cannot find latest-mac.yml…» выглядит как поломка программы, хотя на
+ * самом деле канал обновлений просто ещё не настроен для этой платформы.
+ */
+function humanizeUpdateError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? '');
+
+  // Нет файла со списком сборок: значит в последнем релизе нет файлов
+  // для этой платформы. На Windows это бывает, пока не выложен релиз;
+  // на macOS — пока программа не подписана сертификатом, ведь обновляться
+  // из ad-hoc сборки Squirrel.Mac всё равно не станет.
+  if (/latest(-mac)?\.yml|Cannot find|\b404\b/i.test(raw)) {
+    if (process.platform === 'darwin') {
+      return (
+        'В последнем релизе нет сборки для macOS. Автообновление здесь ' +
+        'работает только у подписанных сборок — текущая собрана без ' +
+        'сертификата. Обновитесь вручную: скачайте образ со страницы релизов ' +
+        'и замените программу в папке «Программы».'
+      );
+    }
+    return (
+      'В последнем релизе пока нет сборки для этой платформы. ' +
+      'Новая версия появится здесь после публикации — попробуйте проверить ' +
+      'обновление позже.'
+    );
+  }
+
+  if (/ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|ECONNRESET|getaddrinfo|offline/i.test(raw)) {
+    return 'Нет связи с сервером обновлений. Проверьте подключение к интернету.';
+  }
+
+  if (/certificate|CERT_|self.signed|unable to verify/i.test(raw)) {
+    return 'Не удалось проверить подлинность соединения с сервером обновлений.';
+  }
+
+  if (!raw) return 'Не удалось проверить обновление';
+
+  // Технические ошибки без понятного перевода оставляем короткими: длинный
+  // текст в окне ничего не объясняет, а подробности можно посмотреть в логе.
+  const firstLine = raw.split('\n')[0].trim();
+  return firstLine.length > 160 ? `${firstLine.slice(0, 160)}…` : firstLine;
 }
 
 /**
@@ -224,10 +271,7 @@ export async function checkForUpdates(): Promise<UpdateStatus> {
   } catch (err) {
     setStatus({
       state: 'error',
-      message:
-        err instanceof Error
-          ? `Не удалось проверить обновление: ${err.message}`
-          : 'Не удалось проверить обновление',
+      message: humanizeUpdateError(err),
       downloadUrl: RELEASE_PAGE,
     });
   }
@@ -245,15 +289,29 @@ export async function downloadUpdate(): Promise<UpdateStatus> {
     if (current.state !== 'available') {
       return current;
     }
+
+    // На macOS без устойчивой подписи скачивание бессмысленно: файл
+    // весит под сотню мегабайт, а Squirrel.Mac всё равно откажется его
+    // ставить. Лучше сразу предложить ручную установку.
+    if (!hasStableSignature()) {
+      setStatus({
+        state: 'downloaded',
+        version: current.version,
+        message:
+          'Обновление найдено, но автоматическая установка на macOS ' +
+          'возможна только у подписанных сборок. Скачайте его со страницы ' +
+          'релизов и замените программу в папке «Программы».',
+        downloadUrl: RELEASE_PAGE,
+      });
+      return current;
+    }
+
     setStatus({ state: 'downloading', percent: 0, message: 'Загружаю обновление…' });
     void mod.autoUpdater.downloadUpdate();
   } catch (err) {
     setStatus({
       state: 'error',
-      message:
-        err instanceof Error
-          ? `Не удалось загрузить обновление: ${err.message}`
-          : 'Не удалось загрузить обновление',
+      message: humanizeUpdateError(err),
       downloadUrl: RELEASE_PAGE,
     });
   }
@@ -286,7 +344,7 @@ export async function installUpdate(): Promise<{ success: boolean; message?: str
   } catch (err) {
     return {
       success: false,
-      message: err instanceof Error ? err.message : 'Не удалось установить обновление',
+      message: humanizeUpdateError(err),
     };
   }
 }
