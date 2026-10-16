@@ -69,27 +69,37 @@ jobs:
           security import "$RUNNER_TEMP/key.p12" -k "$KEYCHAIN" \
             -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
           # Без allowGlobal/пароля codesign не сможет обратиться к ключу
-          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           security set-key-partition-list -S apple-tool:,apple: \
             -s -k "$PASS" "$KEYCHAIN" > /dev/null
           rm -f "$RUNNER_TEMP/key.p12"
 
           # Ключевой момент. `security find-identity -v` показывает только
-          # ДОВЕРЕННЫЕ сертификаты, а electron-builder проверяет подпись тем
-          # же способом. Пока сертификат не помечен доверенным, он молча
-          # отбрасывается: подпись пропускается, идентификатор оказывается
+          # ДОВЕРЕННЫЕ сертификаты, и electron-builder проверяет подпись тем
+          # же способом. Пока сертификат не доверенный, он молча
+          # отбрасывается: подпись пропускается, идентификатор выходит
           # пустым, и на выходе получается ad-hoc сборка без отметки.
+          #
+          # Доверие задаём в СИСТЕМНОЙ связке через sudo: только там
+          # сертификат получает статус доверенного для подписи кода.
+          # sudo -n не спросит пароль, а </dev/null не даст зависнуть на
+          # диалоге подтверждения — на раннере их некому показывать.
           security find-certificate -a -p "$KEYCHAIN" > "$RUNNER_TEMP/cert.pem"
-          security add-trusted-cert -r trustRoot -k "$KEYCHAIN" "$RUNNER_TEMP/cert.pem"
+          sudo -n security add-trusted-cert -d -r trustRoot \
+            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem" </dev/null
           rm -f "$RUNNER_TEMP/cert.pem"
 
-          IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" \
+          # Системная связка должна остаться в списке поиска, иначе
+          # сертификат, которому мы только что дали доверие, не найдётся
+          security list-keychains -d user \
+            -s "$KEYCHAIN" login.keychain-db /Library/Keychains/System.keychain
+
+          IDENTITY=$(security find-identity -v -p codesigning \
             | sed -n 's/.*"\(.*\)"/\1/p' | head -1)
           if [ -z "$IDENTITY" ]; then
             echo "::error::Сертификат импортирован, но macOS не считает его"\
               "доверенным. Проверьте, что пароль в MAC_CSC_PASSWORD верный"\
               "и сертификат создан как самоподписанный."
-            security find-identity -v -p codesigning "$KEYCHAIN" || true
+            security find-identity -v -p codesigning || true
             exit 1
           fi
 
