@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, Save, RefreshCw } from 'lucide-react';
+import { Wallet, Save, RefreshCw, Sun, Moon } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import ExpenseTable from './components/ExpenseTable';
 import AddExpenseModal, {
@@ -62,6 +62,27 @@ function buildDeleteMessage(
   return `Удалить ${noun}? Вместе с ней будут удалены: ${parts.join(' и ')}. Отменить это действие нельзя.`;
 }
 
+export type Theme = 'dark' | 'light';
+
+const THEME_KEY = 'traty-theme';
+
+/**
+ * Читает сохранённую тему.
+ *
+ * Тема ставится на <html> ещё до отрисовки React (скрипт в index.html),
+ * иначе при запуске на секунду мелькала бы тёмная тема поверх светлой.
+ * Здесь берём то же значение, что и скрипт, чтобы React не пересёкся с ним.
+ */
+function readStoredTheme(): Theme {
+  try {
+    const saved = window.localStorage.getItem(THEME_KEY);
+    if (saved === 'light' || saved === 'dark') return saved;
+  } catch {
+    // localStorage может быть недоступен — тогда просто останется тёмная
+  }
+  return 'dark';
+}
+
 function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -85,6 +106,20 @@ function App() {
   });
   const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const fileMenuRef = useRef<HTMLDivElement>(null);
+  const [theme, setTheme] = useState<Theme>(readStoredTheme);
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next: Theme = prev === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      try {
+        window.localStorage.setItem(THEME_KEY, next);
+      } catch {
+        // Не смогли сохранить — тема всё равно переключится в этой сессии
+      }
+      return next;
+    });
+  }, []);
   const [modal, setModal] = useState<
     | { type: 'expense'; categoryId?: number; subcategoryId?: number; subitemId?: number }
     | { type: 'deposit' }
@@ -657,6 +692,15 @@ const handleOpenReleases = async () => {
         <span className="drag-region-title">
           Траты Сани <span className="drag-region-version">v{__APP_VERSION__}</span>
         </span>
+
+        <button
+          className="theme-toggle"
+          onClick={toggleTheme}
+          title={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
+          aria-label={theme === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему'}
+        >
+          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
+        </button>
       </div>
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>

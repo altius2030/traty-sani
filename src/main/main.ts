@@ -17,7 +17,7 @@ import {
   installUpdate,
   onUpdateStatus,
   RELEASE_URL,
-  hasStableSignature,
+  supportsAutoUpdate,
 } from './updater';
 
 /** Данные для экспорта отчёта в Excel — собираются в интерфейсе */
@@ -930,7 +930,7 @@ ipcMain.handle('update:install', async () => {
 ipcMain.handle('update:status', () => ({
   ...getUpdateStatus(),
   releaseUrl: RELEASE_URL,
-  signed: hasStableSignature(),
+  supported: supportsAutoUpdate(),
 }));
 
 ipcMain.handle('update:openReleasePage', async () => {

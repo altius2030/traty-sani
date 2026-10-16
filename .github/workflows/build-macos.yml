@@ -1,31 +1,26 @@
 name: Build macOS (arm64)
 
-# Собирает .dmg на macOS-раннере GitHub и публикует его в GitHub Releases.
+# Собирает .dmg на macOS-раннере GitHub.
 # С Windows собрать macOS-версию нельзя: electron-builder требует системные
 # утилиты macOS для создания образа диска.
 #
-# Подпись. Есть два режима:
+# Подпись и обновления. Здесь приложение подписывается ad-hoc, а сборка
+# публикуется только как артефакт — автообновление на macOS отключено.
+# Причина в том, что оно устроено иначе, чем на Windows: Squirrel.Mac сверяет
+# «designated requirement» новой сборки с требованием уже установленной
+# программы, а у ad-hoc подписи отпечаток меняется при каждой сборке, поэтому
+# требования никогда не совпадут. Обновление на macOS ставится вручную:
+# пользователь скачивает образ и заменяет приложение в папке «Программы».
 #
-# 1) Есть сертификат (секреты MAC_CSC_P12 и MAC_CSC_PASSWORD). Тогда
-#    electron-builder подписывает бандл настоящим идентификатором, и
-#    автообновление на macOS работает: Squirrel.Mac сверяет «designated
-#    requirement» обновления с требованием запущенной программы, поэтому
-#    стабильный сертификат подходит, включая самоподписанный.
-#
-# 2) Сертификата нет. Тогда подпись ad-hoc, автообновление на macOS
-#    невозможно, и сборка публикуется только как артефакт. Старый обход с
-#    ручным codesign и hdiutil остаётся именно для этого случая: если
-#    позволить electron-builder собрать .dmg самому, он перезапишет бандл
-#    и подпись ad-hoc пропадёт.
+# Обход с ручным codesign и hdiutil нужен именно поэтому: если позволить
+# electron-builder собрать .dmg самому, он перезапишет бандл и подпись ad-hoc
+# пропадёт — macOS сочтёт приложение повреждённым.
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
     tags: ['v*']
-
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -45,128 +40,15 @@ jobs:
       - name: Установка зависимостей
         run: npm ci
 
-      # Сертификат лежит в секретах как base64 от .p12. Импортируем его в
-      # одноразовую связку ключей и убираем из неё пароль, иначе
-      # electron-builder не сможет им подписать бандл.
-      - name: Импорт сертификата
-        id: cert
-        env:
-          P12_BASE64: ${{ secrets.MAC_CSC_P12 }}
-          P12_PASSWORD: ${{ secrets.MAC_CSC_PASSWORD }}
-        run: |
-          if [ -z "$P12_BASE64" ]; then
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "Сертификат не задан — сборка без автообновления на macOS"
-            exit 0
-          fi
-          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
-          PASS="runner-temp-$$"
-          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/key.p12"
-
-          security create-keychain -p "$PASS" "$KEYCHAIN"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN"
-          security unlock-keychain -p "$PASS" "$KEYCHAIN"
-          security import "$RUNNER_TEMP/key.p12" -k "$KEYCHAIN" \
-            -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-          # Без allowGlobal/пароля codesign не сможет обратиться к ключу
-          security set-key-partition-list -S apple-tool:,apple: \
-            -s -k "$PASS" "$KEYCHAIN" > /dev/null
-          rm -f "$RUNNER_TEMP/key.p12"
-
-          # Ключевой момент. `security find-identity -v` показывает только
-          # ДОВЕРЕННЫЕ сертификаты, и electron-builder проверяет подпись тем
-          # же способом. Пока сертификат не доверенный, он молча
-          # отбрасывается: подпись пропускается, идентификатор выходит
-          # пустым, и на выходе получается ad-hoc сборка без отметки.
-          #
-          # Доверие задаём в СИСТЕМНОЙ связке через sudo: только там
-          # сертификат получает статус доверенного для подписи кода.
-          # sudo -n не спросит пароль, а </dev/null не даст зависнуть на
-          # диалоге подтверждения — на раннере их некому показывать.
-          security find-certificate -a -p "$KEYCHAIN" > "$RUNNER_TEMP/cert.pem"
-          # -p codeSign обязателен: без указания политики сертификат
-          # доверен как корневой, но find-identity -p codesigning его
-          # не считает пригодным для подписи
-          sudo -n security add-trusted-cert -d -r trustRoot -p codeSign \
-            -k /Library/Keychains/System.keychain "$RUNNER_TEMP/cert.pem" </dev/null
-          rm -f "$RUNNER_TEMP/cert.pem"
-
-          # Системная связка должна остаться в списке поиска, иначе
-          # сертификат, которому мы только что дали доверие, не найдётся
-          security list-keychains -d user \
-            -s "$KEYCHAIN" login.keychain-db /Library/Keychains/System.keychain
-
-          IDENTITY=$(security find-identity -v -p codesigning \
-            | sed -n 's/.*"\(.*\)"/\1/p' | head -1)
-          if [ -z "$IDENTITY" ]; then
-            echo "::error::Сертификат не признан пригодным для подписи кода."
-            echo "--- все идентификаторы в связках (без фильтра -v) ---"
-            security find-identity -p codesigning || true
-            echo "--- только доверенные (-v) ---"
-            security find-identity -v -p codesigning || true
-            echo "--- свойства сертификата ---"
-            security find-certificate -a -c "Traty Sani Release" -p \
-              /Library/Keychains/System.keychain | openssl x509 \
-              -noout -text 2>/dev/null | grep -A2 -Ei "Basic Constraints|Key Usage|Extended" || true
-            exit 1
-          fi
-
-          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
-          echo "signed=true" >> "$GITHUB_OUTPUT"
-          echo "Сертификат: $IDENTITY"
-
-      # Подписанный режим: electron-builder собирает и подписывает сам,
-      # поэтому zip и dmg получаются из одного и того же бандла и
-      # designated requirement у них совпадает.
-      #
-      # CSC_NAME — имя сертификата в связке ключей: электрон-билдер по
-      # умолчанию ищет сертификаты Apple и самоподписанный не признаёт,
-      # а здесь мы его называем явно.
-      # MACOS_SIGN_IDENTITY читает хук afterPack: он кладёт отметку в бандл
-      # ДО упаковки в zip, иначе отметка в архив не попала бы.
-      - name: Сборка с подписью
-        if: steps.cert.outputs.signed == 'true'
-        env:
-          CSC_NAME: ${{ steps.cert.outputs.identity }}
-          MACOS_SIGN_IDENTITY: ${{ steps.cert.outputs.identity }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        run: |
-          if [ "$IS_TAG" = "true" ]; then
-            npm run release:mac
-          else
-            npm run build:mac
-          fi
-
-      - name: Проверка подписи и содержимого
-        if: steps.cert.outputs.signed == 'true'
-        run: |
-          set -e
-          APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)
-          [ -n "$APP" ] || { echo "app не найден"; exit 1; }
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          echo "--- designated requirement ---"
-          codesign -d -r- "$APP" 2>&1 | tail -2
-          echo "--- отметка для приложения ---"
-          cat "$APP/Contents/Resources/stable-signature.txt"
-          echo "--- артефакты ---"
-          ls -lh release/*.zip release/*.dmg release/latest-mac.yml
-          # Squirrel.Mac обновляется только из zip: без него latest-mac.yml
-          # получится без вложения и обновление упадёт с «ZIP file not provided»
-          [ -n "$(ls release/*.zip 2>/dev/null)" ] || { echo "нет .zip — автообновление сломается"; exit 1; }
-
-      # Режим без сертификата: подпись ad-hoc + ручная сборка образа.
-      # Идентификатор подписи отключается флагом -c.mac.identity=null: в
-      # общем конфиге identity не задан, иначе electron-builder требует
-      # сертификат и падает там, где его быть не может.
-      - name: Сборка без сертификата (ad-hoc)
-        if: steps.cert.outputs.signed != 'true'
+      # Идентификатор подписи отключается флагом -c.mac.identity=null:
+      # electron-builder по умолчанию требует сертификат и падает там,
+      # где его быть не может.
+      - name: Сборка
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: npm run build:mac:adhoc
+        run: npm run build:mac
 
       - name: Подпись бандла (ad-hoc)
-        if: steps.cert.outputs.signed != 'true'
         run: |
           set -e
           APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)
@@ -184,7 +66,6 @@ jobs:
           lipo -archs "$APP/Contents/MacOS/"*
 
       - name: Создание .dmg из подписанного бандла
-        if: steps.cert.outputs.signed != 'true'
         run: |
           set -e
           APP=$(find release/mac-arm64 -maxdepth 1 -name '*.app' | head -1)

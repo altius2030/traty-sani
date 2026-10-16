@@ -1,7 +1,7 @@
 {
   "name": "traty-sani",
   "productName": "Траты Сани",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "Траты Сани: учёт расходов, внесений, остатка и отчёты за период",
   "main": "dist/main/main.js",
   "author": "Траты Сани",
@@ -17,13 +17,11 @@
     "prebuild:win": "npm run build && npm run build:template-db",
     "build:win": "electron-builder --win --x64 --publish never",
     "release:win": "npm run build && npm run build:template-db && electron-builder --win --x64 --publish always",
-    "release:mac": "npm run build && npm run build:template-db && electron-builder --mac --arm64 --publish always",
     "build:portable": "npm run build && npm run build:template-db && electron-builder --win portable --x64",
     "prebuild:mac": "npm run build && npm run build:template-db",
-    "build:mac": "electron-builder --mac --arm64 --publish never",
-    "build:mac:adhoc": "npm run build && npm run build:template-db && electron-builder --mac --arm64 -c.mac.identity=null --publish never",
+    "build:mac": "electron-builder --mac --arm64 -c.mac.identity=null --publish never",
     "start": "npm run build && electron .",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.main.json --noEmit"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
@@ -69,7 +67,6 @@
     "asarUnpack": [
       "**/node_modules/better-sqlite3/**"
     ],
-    "afterPack": "scripts/after-pack.js",
     "win": {
       "target": [
         {
@@ -103,12 +100,6 @@
           "arch": [
             "arm64"
           ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64"
-          ]
         }
       ],
       "category": "public.app-category.finance",
@@ -118,9 +109,6 @@
     "dmg": {
       "title": "Траты Сани ${version}",
       "artifactName": "Traty-Sani-${version}-arm64.${ext}"
-    },
-    "zip": {
-      "artifactName": "Traty-Sani-${version}-arm64-mac.${ext}"
     },
     "nsis": {
       "oneClick": false,

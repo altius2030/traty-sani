@@ -1,23 +1,23 @@
 import { autoUpdater } from 'electron-updater';
-import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
 
 /**
  * Обновление приложения.
  *
  * Логика живёт в главном процессе, а интерфейс только показывает состояние:
- * так обновление продолжает качаться, даже если окно перерисовалось.
+ * так загрузка продолжает качаться, даже если окно перерисовалось.
  *
  * Канал обновлений — GitHub Releases: electron-updater читает из корня
- * релиза latest.yml (Windows) и latest-mac.yml (macOS), а сами файлы
- * сборки лежат рядом с ними.
+ * релиза latest.yml, а сам установщик лежит рядом с ним. Публикуется только
+ * сборка по тегу: обычные сборки из ветки main публикуются лишь как
+ * артефакты, иначе установленные копии начали бы предлагать себе сборку
+ * из ветки.
  *
- * Про подпись на macOS: Squirrel.Mac сверяет «designated requirement»
- * обновления с требованием запущенной программы, а не сертификат Apple.
- * Поэтому стабильный самоподписанный сертификат подходит — при условии,
- * что им подписан каждая сборка. Ad-hoc подпись (`codesign --sign -`)
- * для этого не годится: её отпечаток меняется при каждой сборке, и
- * требования никогда не совпадут.
+ * Про macOS. Автообновление там устроено иначе: Squirrel.Mac сверяет
+ * «designated requirement» новой сборки с требованием уже установленной
+ * программы, а у подписи ad-hoc отпечаток меняется при каждой сборке,
+ * поэтому требования никогда не совпадут. Без устойчивой подписи обновление
+ * не установится, поэтому на macOS проверка не выполняется вовсе, а
+ * пользователю предлагается скачать образ вручную.
  */
 
 export type UpdateState =
@@ -49,26 +49,24 @@ const REPO = 'altius2030/traty-sani';
 const RELEASE_PAGE = `https://github.com/${REPO}/releases/latest`;
 
 /**
- * Есть ли у сборки устойчивая подпись.
+ * Поддерживается ли автообновление на этой платформе.
  *
- * CI кладёт в бандл файл `stable-signature.txt` с именем сертификата, когда
- * подписывает приложение настоящим (в том числе самоподписанным)
- * идентификатором. При ad-hoc подписи файла нет — и автоустановка на macOS
- * невозможна: отпечаток ad-hoc меняется при каждой сборке, поэтому
- * designated requirement обновления никогда не совпадёт с требованием
- * запущенной программы.
- *
- * Windows подписей не требует, там ответ всегда «да».
+ * На Windows установщик NSIS обновляется тихо, подпись не требуется.
+ * На macOS автообновление отключено: Squirrel.Mac требует, чтобы подпись
+ * обновления удовлетворяла требованию уже установленной программы, а при
+ * подписи ad-hoc это невозможно. Поэтому проверка на macOS не ходит в сеть,
+ * а пользователю предлагается скачать образ вручную.
  */
-export function hasStableSignature(): boolean {
-  if (process.platform !== 'darwin') return true;
-  try {
-    const marker = join(process.resourcesPath, 'stable-signature.txt');
-    return existsSync(marker) && readFileSync(marker, 'utf-8').trim().length > 0;
-  } catch {
-    return false;
-  }
+export function supportsAutoUpdate(): boolean {
+  return process.platform !== 'darwin';
 }
+
+/** Текст для macOS вместо проверки обновлений */
+export const MANUAL_UPDATE_HINT =
+  'На macOS обновления устанавливаются вручную: скачайте образ на странице ' +
+  'релизов и замените программу в папке «Программы». Автоматическое ' +
+  'обновление недоступно, потому что сборка не подписана сертификатом, ' +
+  'который macOS принимает для проверки подлинности обновлений.';
 
 // electron-updater импортируется лениво: он тянет за собой сеть и файловые
 // операции, а нужен только по нажатию кнопки.
@@ -78,11 +76,10 @@ let updater: import('electron-updater').AppUpdater | null = null;
 
 // Начальное значение обязано учитывать платформу: при canInstall = false
 // окно обновления покажет «автоустановка недоступна» даже на Windows,
-// где она работает. hasStableSignature() читает файл при каждом вызове,
-// поэтому состояние пересобирается перед отдачей наружу.
+// где она работает.
 let current: UpdateStatus = {
   state: 'idle',
-  canInstall: process.platform !== 'darwin',
+  canInstall: supportsAutoUpdate(),
 };
 
 let emit: (status: UpdateStatus) => void = () => {};
@@ -95,7 +92,7 @@ function setStatus(patch: Partial<UpdateStatus>): void {
 function baseStatus(): UpdateStatus {
   return {
     state: 'idle',
-    canInstall: hasStableSignature(),
+    canInstall: supportsAutoUpdate(),
   };
 }
 
@@ -167,9 +164,7 @@ export function onUpdateStatus(cb: (status: UpdateStatus) => void): void {
 }
 
 export function getUpdateStatus(): UpdateStatus {
-  // Подпись не меняется за время работы программы, но проверить её здесь
-  // дёшево и это снимает зависимость от того, как было собрано состояние
-  return { ...current, canInstall: hasStableSignature() };
+  return { ...current, canInstall: supportsAutoUpdate() };
 }
 
 /**
@@ -177,25 +172,15 @@ export function getUpdateStatus(): UpdateStatus {
  *
  * Сырое сообщение electron-updater — это HTTP-заголовки, URL и стек-трейс
  * на пол-экрана. Пользователю от этого ничто не становится понятнее, а
- * «Cannot find latest-mac.yml…» выглядит как поломка программы, хотя на
- * самом деле канал обновлений просто ещё не настроен для этой платформы.
+ * «Cannot find latest.yml…» выглядит как поломка программы, хотя на самом
+ * деле канал обновлений просто ещё не наполнен.
  */
 function humanizeUpdateError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err ?? '');
 
-  // Нет файла со списком сборок: значит в последнем релизе нет файлов
-  // для этой платформы. На Windows это бывает, пока не выложен релиз;
-  // на macOS — пока программа не подписана сертификатом, ведь обновляться
-  // из ad-hoc сборки Squirrel.Mac всё равно не станет.
+  // Нет файла со списком сборок — значит в последнем релизе ещё ничего
+  // не опубликовано. Это не поломка, поэтому и звучит соответственно.
   if (/latest(-mac)?\.yml|Cannot find|\b404\b/i.test(raw)) {
-    if (process.platform === 'darwin') {
-      return (
-        'В последнем релизе нет сборки для macOS. Автообновление здесь ' +
-        'работает только у подписанных сборок — текущая собрана без ' +
-        'сертификата. Обновитесь вручную: скачайте образ со страницы релизов ' +
-        'и замените программу в папке «Программы».'
-      );
-    }
     return (
       'В последнем релизе пока нет сборки для этой платформы. ' +
       'Новая версия появится здесь после публикации — попробуйте проверить ' +
@@ -218,7 +203,6 @@ function humanizeUpdateError(err: unknown): string {
   const firstLine = raw.split('\n')[0].trim();
   return firstLine.length > 160 ? `${firstLine.slice(0, 160)}…` : firstLine;
 }
-
 /**
  * Оборачивает промис таймаутом.
  *
@@ -245,6 +229,17 @@ function withTimeout<T>(p: Promise<T>, ms: number, message: string): Promise<T> 
 /** Ручная проверка обновлений по кнопке в интерфейсе */
 export async function checkForUpdates(): Promise<UpdateStatus> {
   setStatus(baseStatus());
+
+  // На macOS проверки нет — сразу объясняем, почему, и не мучим сеть
+  if (!supportsAutoUpdate()) {
+    setStatus({
+      state: 'not-available',
+      message: MANUAL_UPDATE_HINT,
+      downloadUrl: RELEASE_PAGE,
+    });
+    return current;
+  }
+
   setStatus({ state: 'checking', message: 'Проверяю наличие обновления…' });
 
   try {
@@ -284,28 +279,16 @@ export async function checkForUpdates(): Promise<UpdateStatus> {
  * autoDownload = false только сообщает о наличии версии, качать надо явно.
  */
 export async function downloadUpdate(): Promise<UpdateStatus> {
+  if (!supportsAutoUpdate()) {
+    setStatus({ state: 'not-available', message: MANUAL_UPDATE_HINT, downloadUrl: RELEASE_PAGE });
+    return current;
+  }
+
   try {
     const mod = await ensureUpdater();
     if (current.state !== 'available') {
       return current;
     }
-
-    // На macOS без устойчивой подписи скачивание бессмысленно: файл
-    // весит под сотню мегабайт, а Squirrel.Mac всё равно откажется его
-    // ставить. Лучше сразу предложить ручную установку.
-    if (!hasStableSignature()) {
-      setStatus({
-        state: 'downloaded',
-        version: current.version,
-        message:
-          'Обновление найдено, но автоматическая установка на macOS ' +
-          'возможна только у подписанных сборок. Скачайте его со страницы ' +
-          'релизов и замените программу в папке «Программы».',
-        downloadUrl: RELEASE_PAGE,
-      });
-      return current;
-    }
-
     setStatus({ state: 'downloading', percent: 0, message: 'Загружаю обновление…' });
     void mod.autoUpdater.downloadUpdate();
   } catch (err) {
@@ -323,20 +306,13 @@ export async function downloadUpdate(): Promise<UpdateStatus> {
  * и запускается заново.
  */
 export async function installUpdate(): Promise<{ success: boolean; message?: string }> {
+  if (!supportsAutoUpdate()) {
+    return { success: false, message: MANUAL_UPDATE_HINT };
+  }
+
   try {
     const mod = await ensureUpdater();
     if (!mod.autoUpdater) throw new Error('Модуль обновления не загружен');
-
-    // На macOS автоустановка требует устойчивой подписи; без неё Squirrel.Mac
-    // откажется обновлять. Лучше честно сказать об этом, чем зависнуть.
-    if (!hasStableSignature()) {
-      return {
-        success: false,
-        message:
-          'Автоустановка на macOS требует устойчивой подписи приложения. ' +
-          'Скачайте обновление вручную и замените программу в «Программах».',
-      };
-    }
 
     // isSilent = false — обновление покажет окно установщика пользователю
     mod.autoUpdater.quitAndInstall(false, true);

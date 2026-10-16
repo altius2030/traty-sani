@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Траты Сани</title>
+    <script>
+      // Тема ставится до отрисовки React, иначе при запуске на долю секунды
+      // мелькала бы тёмная тема поверх светлой. Значение читает и App:
+      // window.localStorage здесь уже доступен, в отличие от модулей npm.
+      try {
+        var t = window.localStorage.getItem('traty-theme');
+        document.documentElement.dataset.theme = t === 'light' ? 'light' : 'dark';
+      } catch (e) {
+        document.documentElement.dataset.theme = 'dark';
+      }
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">

@@ -21,8 +21,8 @@ export interface UpdateStatus {
   downloadUrl?: string;
   /** Ссылка на страницу релиза, приходит из главного процесса */
   releaseUrl?: string;
-  /** Есть ли у сборки устойчивая подпись (важно для macOS) */
-  signed?: boolean;
+  /** Поддерживается ли автообновление на этой платформе (важно для macOS) */
+  supported?: boolean;
 }
 
 export interface ElectronAPI {

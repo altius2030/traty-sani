@@ -31,6 +31,43 @@ html, body, #root {
   width: 100%;
 }
 
+/* Светлая тема. Переопределяем только переменные: вся остальная вёрстка
+   уже написана через них, поэтому отдельно перекрашивать элементы не нужно.
+
+   Акценты здесь темнее, чем в тёмной теме: #00d4aa на белом фоне почти
+   не читается, особенно в мелком тексте. */
+[data-theme='light'] {
+  --bg-primary: #f2f4f8;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e9edf4;
+  --bg-card: #ffffff;
+  --bg-hover: #e6ebf3;
+  --border-color: #d3dae6;
+  --text-primary: #151824;
+  --text-secondary: #495064;
+  --text-muted: #737b91;
+  --accent-primary: #009374;
+  --accent-secondary: #0a78b8;
+  --accent-warning: #a8690a;
+  --accent-danger: #d3303f;
+  --accent-purple: #7c3ad0;
+  --shadow: 0 2px 8px rgba(23, 31, 56, 0.08);
+  --shadow-lg: 0 8px 28px rgba(23, 31, 56, 0.16);
+}
+
+/* Тёмные тени на светлом фоне выглядят грязно, а белая рамка у выбранного
+   образца цвета сливается с фоном */
+[data-theme='light'] .color-swatch.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--accent-primary), 0 0 0 4px var(--bg-primary);
+}
+
+[data-theme='light'] .file-menu-trigger:hover,
+[data-theme='light'] .file-menu-trigger.open,
+[data-theme='light'] .file-menu-item:hover {
+  background: var(--bg-hover);
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: var(--bg-primary);
@@ -205,6 +242,36 @@ input::placeholder {
   padding: 6px 10px 2px;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* Переключатель темы — в правой части шапки.
+
+   На Windows там же находятся системные кнопки окна (свернуть, развернуть,
+   закрыть), поэтому отступаем от них, иначе кнопка окажется под ними и
+   не нажимается. На macOS кнопки слева (для них уже есть padding-left),
+   так что справа место свободно. */
+.theme-toggle {
+  margin-left: auto;
+  margin-right: 140px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  transition: var(--transition);
+  -webkit-app-region: no-drag;
+}
+
+.theme-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+[data-platform='darwin'] .theme-toggle {
+  margin-right: 12px;
 }
 
 /* Версия сборки в заголовке окна */

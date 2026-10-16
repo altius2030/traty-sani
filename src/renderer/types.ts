@@ -89,8 +89,8 @@ export interface UpdateStatus {
   canInstall: boolean;
   downloadUrl?: string;
   releaseUrl?: string;
-  /** Есть ли у сборки устойчивая подпись — важно для macOS */
-  signed?: boolean;
+  /** Поддерживается ли автообновление на этой платформе */
+  supported?: boolean;
 }
 
 export interface CategoryBreakdown {
