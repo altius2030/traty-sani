@@ -11,6 +11,7 @@ import ReportModal from './components/ReportModal';
 import { buildChartCsv } from './components/ReportCharts';
 import ToastContainer from './components/ToastContainer';
 import type {
+  DepositCategory,
   Category,
   Deposit,
   Expense,
@@ -60,6 +61,7 @@ function App() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [deposits, setDeposits] = useState<Deposit[]>([]);
+  const [depositCategories, setDepositCategories] = useState<DepositCategory[]>([]);
   const [currentBalance, setCurrentBalance] = useState(0);
   const [baseCheckpoint, setBaseCheckpoint] = useState<{
     amount: number;
@@ -125,10 +127,21 @@ function App() {
     setBaseCheckpoint({ amount: balance.base, date: balance.baseDate });
   }, []);
 
+  const loadDepositCategories = useCallback(async () => {
+    const list = await window.electronAPI.getDepositCategories();
+    setDepositCategories(list);
+    return list;
+  }, []);
+
   useEffect(() => {
     (async () => {
       try {
-        await Promise.all([loadCategories(), loadExpenses(period), loadBalances()]);
+        await Promise.all([
+          loadCategories(),
+          loadExpenses(period),
+          loadBalances(),
+          loadDepositCategories(),
+        ]);
       } catch (err) {
         console.error('Ошибка загрузки:', err);
         addToast('Ошибка при загрузке данных', 'error');
@@ -185,16 +198,53 @@ function App() {
     await loadBalances();
   };
 
-  const handleAddDeposit = async (data: { amount: number; date: string; note: string }) => {
+  const handleAddDeposit = async (data: { amount: number; date: string; categoryId: number }) => {
     try {
-      await window.electronAPI.addDeposit(data);
+      const saved = await window.electronAPI.addDeposit(data);
       setModal(null);
-      addToast(`Внесено ${formatMoney(data.amount)}`);
+      const label = saved?.category_name ? ` — ${saved.category_name}` : '';
+      addToast(`Внесено ${formatMoney(data.amount)}${label}`);
       await Promise.all([loadExpenses(period), loadBalances()]);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Не удалось сохранить внесение';
       addToast(message, 'error');
+    }
+  };
+
+  /** Создание категории внесения; возвращает её, чтобы форма сразу выбрала */
+  const handleAddDepositCategory = async (name: string) => {
+    try {
+      const created = await window.electronAPI.addDepositCategory(name);
+      await loadDepositCategories();
+      return created;
+    } catch (err) {
+      addToast(
+        err instanceof Error ? err.message : 'Не удалось создать категорию',
+        'error'
+      );
+      throw err;
+    }
+  };
+
+  /** Удаление категории внесения не трогает сами внесения — пропадает только метка */
+  const handleDeleteDepositCategory = async (id: number) => {
+    const cat = depositCategories.find((c) => c.id === id);
+    const count = cat?.deposits_count ?? 0;
+    try {
+      await window.electronAPI.deleteDepositCategory(id);
+      addToast(
+        count > 0
+          ? `Категория удалена. ${count} внес. осталось без категории`
+          : 'Категория удалена',
+        'info'
+      );
+      await Promise.all([loadDepositCategories(), loadExpenses(period)]);
+    } catch (err) {
+      addToast(
+        err instanceof Error ? err.message : 'Не удалось удалить категорию',
+        'error'
+      );
     }
   };
 
@@ -332,10 +382,16 @@ function App() {
 
     lines.push('');
     lines.push('Внесения:');
-    lines.push('Дата;Сумма;Комментарий');
+    lines.push('Дата;Сумма;Категория');
     for (const d of rep.deposits) {
-      const note = d.note.replace(/;/g, ',');
-      lines.push(`${d.date};${d.amount.toFixed(2)};${note}`);
+      const cat = (d.category_name || 'Без категории').replace(/;/g, ',');
+      lines.push(`${d.date};${d.amount.toFixed(2)};${cat}`);
+    }
+    lines.push('');
+    lines.push('Внесения по категориям:');
+    lines.push('Категория;Сумма');
+    for (const [cat, total] of Object.entries(rep.byDepositCategory || {})) {
+      lines.push(`${cat.replace(/;/g, ',')};${total.toFixed(2)}`);
     }
     lines.push('');
     lines.push('Расходы по категориям:');
@@ -450,7 +506,12 @@ function App() {
       )}
 
       {modal?.type === 'deposit' && (
-        <AddDepositModal onClose={() => setModal(null)} onSubmit={handleAddDeposit} />
+        <AddDepositModal
+          depositCategories={depositCategories}
+          onClose={() => setModal(null)}
+          onSubmit={handleAddDeposit}
+          onAddCategory={handleAddDepositCategory}
+        />
       )}
 
       {modal?.type === 'balance' && (
@@ -469,6 +530,9 @@ function App() {
           onSetColor={handleSetColor}
           onAddSubitem={handleAddSubitem}
           onDeleteSubitem={askDeleteSubitem}
+          depositCategories={depositCategories}
+          onAddDepositCategory={handleAddDepositCategory}
+          onDeleteDepositCategory={handleDeleteDepositCategory}
         />
       )}
 

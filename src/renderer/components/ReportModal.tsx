@@ -248,7 +248,7 @@ export default function ReportModal({ period, onClose, onExport }: ReportModalPr
                   <thead>
                     <tr>
                       <th style={{ width: 110 }}>Дата</th>
-                      <th>Комментарий</th>
+                      <th>Категория</th>
                       <th style={{ textAlign: 'right', width: 160 }}>Сумма</th>
                     </tr>
                   </thead>
@@ -262,7 +262,7 @@ export default function ReportModal({ period, onClose, onExport }: ReportModalPr
                             year: '2-digit',
                           })}
                         </td>
-                        <td>{d.note}</td>
+                        <td>{d.category_name || 'Без категории'}</td>
                         <td
                           style={{
                             textAlign: 'right',
@@ -276,6 +276,24 @@ export default function ReportModal({ period, onClose, onExport }: ReportModalPr
                     ))}
                   </tbody>
                 </table>
+
+                {/* Итог по категориям внесений — чтобы было видно, откуда
+                    пришли деньги, а не только сумму по дням */}
+                {Object.keys(report.byDepositCategory || {}).length > 1 && (
+                  <div className="deposit-totals">
+                    {Object.entries(report.byDepositCategory)
+                      .sort((a, b) => b[1] - a[1])
+                      .map(([name, total]) => (
+                        <div key={name} className="deposit-total-row">
+                          <span className="chart-legend-dot" style={{ background: 'var(--accent-primary)' }} />
+                          <span className="deposit-total-name">{name}</span>
+                          <span className="deposit-total-sum">
+                            {formatMoney(total)}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
                 )}
               </>

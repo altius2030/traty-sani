@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, Plus, Trash2, Banknote } from 'lucide-react';
-import type { Category, Subcategory, Subitem } from '../types';
+import type { Category, Subcategory, Subitem, DepositCategory } from '../types';
 import { toISODate } from '../lib/format';
 import { CATEGORY_ICONS, getCategoryIcon, CHART_COLORS } from '../lib/icons';
 
@@ -218,29 +218,57 @@ export default function AddExpenseModal({
 }
 
 interface AddDepositModalProps {
+  depositCategories: DepositCategory[];
   onClose: () => void;
-  onSubmit: (data: { amount: number; date: string; note: string }) => void;
+  onSubmit: (data: { amount: number; date: string; categoryId: number }) => void;
+  /** Создание новой категории прямо из формы */
+  onAddCategory: (name: string) => Promise<{ id: number; name: string }>;
 }
 
 /**
- * Внесение денег. Комментарий обязателен — без него внесение не сохраняется.
- * Проверка дублируется на сервере (см. db:addDeposit) и в БД (CHECK).
+ * Внесение денег. Категория обязательна — она заменила свободный комментарий,
+ * чтобы одинаковые формулировки собирались в справочник и по ним можно было
+ * строить разбивку отчёта. Проверка дублируется на сервере (см. db:addDeposit).
  */
-export function AddDepositModal({ onClose, onSubmit }: AddDepositModalProps) {
+export function AddDepositModal({
+  depositCategories,
+  onClose,
+  onSubmit,
+  onAddCategory,
+}: AddDepositModalProps) {
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(toISODate(new Date()));
-  const [note, setNote] = useState('');
-  const [noteTouched, setNoteTouched] = useState(false);
+  const [categoryId, setCategoryId] = useState<number | ''>('');
+  const [categoryTouched, setCategoryTouched] = useState(false);
+  const [newCategory, setNewCategory] = useState('');
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState('');
 
   const amountNum = parseFloat(amount.replace(',', '.'));
   const amountValid = Number.isFinite(amountNum) && amountNum > 0;
-  const noteValid = note.trim().length > 0;
+  const categoryValid = categoryId !== '' && categoryId != null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amountValid || !noteValid) return;
-    onSubmit({ amount: amountNum, date, note: note.trim() });
+    if (!amountValid || !categoryValid) return;
+    onSubmit({ amount: amountNum, date, categoryId: Number(categoryId) });
+  };
+
+  const handleCreateCategory = async () => {
+    const name = newCategory.trim();
+    if (!name) return;
+    setCreating(true);
+    setError('');
+    try {
+      const created = await onAddCategory(name);
+      setCategoryId(created.id);
+      setNewCategory('');
+      setCategoryTouched(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось создать категорию');
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -287,30 +315,63 @@ export function AddDepositModal({ onClose, onSubmit }: AddDepositModalProps) {
           </div>
 
           <div className="form-group">
-            <label className="form-label" htmlFor="deposit-note">
-              Комментарий <span style={{ color: 'var(--accent-danger)' }}>*</span>
+            <label className="form-label" htmlFor="deposit-category">
+              Категория внесения <span style={{ color: 'var(--accent-danger)' }}>*</span>
             </label>
-            <textarea
-              id="deposit-note"
-              rows={3}
-              placeholder="Обязательно: откуда деньги, например «Пополнение с карты» или «Выручка за заказ»"
-              value={note}
-              onChange={(e) => {
-                setNote(e.target.value);
-                if (noteTouched) setError('');
-              }}
-              onBlur={() => setNoteTouched(true)}
-              maxLength={500}
-              required
-              style={{ resize: 'vertical', fontFamily: 'inherit' }}
-            />
-            {noteTouched && !noteValid ? (
-              <div className="field-error">Комментарий обязателен к внесению</div>
+            {depositCategories.length > 0 ? (
+              <div className="select-wrapper">
+                <select
+                  id="deposit-category"
+                  value={categoryId}
+                  onChange={(e) => {
+                    setCategoryId(e.target.value ? Number(e.target.value) : '');
+                    if (categoryTouched) setError('');
+                  }}
+                  onBlur={() => setCategoryTouched(true)}
+                  required
+                >
+                  <option value="">Выберите категорию…</option>
+                  {depositCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             ) : (
-              <div className="field-hint">
-                Комментарий обязателен — он попадёт в отчёт за период.
+              <div className="field-hint" style={{ marginBottom: 8 }}>
+                Категорий пока нет — создайте первую, например «Пополнение с карты».
               </div>
             )}
+            {categoryTouched && !categoryValid && (
+              <div className="field-error">Выберите категорию внесения</div>
+            )}
+
+            {/* Новая категория создаётся прямо здесь — не нужно закрывать форму */}
+            <form
+              className="inline-create"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void handleCreateCategory();
+              }}
+            >
+              <input
+                type="text"
+                placeholder="Новая категория внесения…"
+                value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value)}
+                maxLength={120}
+              />
+              <button
+                type="submit"
+                className="btn btn-secondary"
+                disabled={!newCategory.trim() || creating}
+                title="Добавить категорию в справочник"
+              >
+                <Plus size={14} />
+                {creating ? '...' : 'Добавить'}
+              </button>
+            </form>
           </div>
 
           {error && <div className="form-error">{error}</div>}
@@ -322,12 +383,12 @@ export function AddDepositModal({ onClose, onSubmit }: AddDepositModalProps) {
             <button
               type="submit"
               className="btn btn-primary"
-              disabled={!amountValid || !noteValid}
+              disabled={!amountValid || !categoryValid}
               title={
                 !amountValid
                   ? 'Укажите сумму больше нуля'
-                  : !noteValid
-                  ? 'Укажите комментарий'
+                  : !categoryValid
+                  ? 'Выберите или создайте категорию внесения'
                   : undefined
               }
             >
@@ -432,6 +493,7 @@ export function AddBalanceModal({ onClose, onSubmit }: AddBalanceModalProps) {
 
 interface AddCategoryModalProps {
   categories: Category[];
+  depositCategories: DepositCategory[];
   onClose: () => void;
   onAddCategory: (name: string) => void;
   onAddSubcategory: (categoryId: number, name: string) => void;
@@ -441,10 +503,13 @@ interface AddCategoryModalProps {
   onSetColor: (id: number, color: string | null) => void;
   onAddSubitem: (subcategoryId: number, name: string) => void;
   onDeleteSubitem: (id: number) => void;
+  onAddDepositCategory: (name: string) => Promise<{ id: number; name: string }>;
+  onDeleteDepositCategory: (id: number) => void;
 }
 
 export function CategoryManagerModal({
   categories,
+  depositCategories,
   onClose,
   onAddCategory,
   onAddSubcategory,
@@ -454,10 +519,13 @@ export function CategoryManagerModal({
   onSetColor,
   onAddSubitem,
   onDeleteSubitem,
+  onAddDepositCategory,
+  onDeleteDepositCategory,
 }: AddCategoryModalProps) {
   const [newCategory, setNewCategory] = useState('');
   const [newSubcategory, setNewSubcategory] = useState<Record<number, string>>({});
   const [newSubitem, setNewSubitem] = useState<Record<number, string>>({});
+  const [newDepositCategory, setNewDepositCategory] = useState('');
   const [iconPickerFor, setIconPickerFor] = useState<number | null>(null);
   const [colorPickerFor, setColorPickerFor] = useState<number | null>(null);
 
@@ -747,6 +815,73 @@ export function CategoryManagerModal({
               </div>
             );
           })}
+        </div>
+
+        {/* Категории внесений живут отдельным справочником: они пришли из
+            прежних комментариев и не имеют ничего общего с категориями трат */}
+        <div className="section-divider" />
+
+        <div className="section-title">Категории внесений</div>
+        <div className="field-hint" style={{ marginBottom: 10 }}>
+          Откуда пришли деньги. Раньше это был свободный комментарий — теперь
+          одинаковые комментарии объединены в одну категорию.
+        </div>
+
+        <div className="category-list-manage">
+          {depositCategories.length === 0 && (
+            <div className="empty-hint">Пока нет ни одной категории внесений</div>
+          )}
+          {depositCategories.map((c) => (
+            <div key={c.id} className="manage-row">
+              <span className="manage-name">{c.name}</span>
+              <span className="manage-count">
+                {c.deposits_count ?? 0} внес.
+              </span>
+              <button
+                className="action-btn"
+                onClick={() => onDeleteDepositCategory(c.id)}
+                title={
+                  (c.deposits_count ?? 0) > 0
+                    ? `Удалить категорию. ${c.deposits_count} внесений сохранятся, но останутся без категории.`
+                    : 'Удалить категорию'
+                }
+              >
+                <Trash2 size={14} color="var(--accent-danger)" />
+              </button>
+            </div>
+          ))}
+
+          <form
+            className="inline-create"
+            style={{ marginTop: 10 }}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const name = newDepositCategory.trim();
+              if (!name) return;
+              try {
+                await onAddDepositCategory(name);
+                setNewDepositCategory('');
+              } catch {
+                /* обработка — в App.tsx через addToast */
+              }
+            }}
+          >
+            <input
+              type="text"
+              placeholder="Новая категория внесения…"
+              value={newDepositCategory}
+              onChange={(e) => setNewDepositCategory(e.target.value)}
+              maxLength={120}
+            />
+            <button
+              type="submit"
+              className="btn btn-secondary"
+              disabled={!newDepositCategory.trim()}
+            >
+              <Plus size={14} />
+              Добавить
+            </button>
+          </form>
         </div>
 
         <div className="modal-footer">

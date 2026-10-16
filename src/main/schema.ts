@@ -61,20 +61,43 @@ export const SCHEMA_SQL = `
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- Справочник категорий внесений. До 1.0.8 роль этой справочника играл
+  -- свободный комментарий в каждом внесении; теперь одинаковые комментарии
+  -- схлопываются в одну категорию (см. migrateDepositNotesToCategories).
+  --
+  -- Про NOCASE: его здесь сознательно нет. better-sqlite3 собран без ICU,
+  -- а встроенный в SQLite NOCASE раскладывает только ASCII — «Зарплата» и
+  -- «зарплата» для него разные строки, и UNIQUE не срабатывает. Проверено
+  -- экспериментально: дубль всё равно вставляется. Поэтому сравнение
+  -- без учёта регистра делается в JS (см. db:addDepositCategory).
+  CREATE TABLE IF NOT EXISTS deposit_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    sort_order INTEGER NOT NULL DEFAULT 0
+  );
+
   -- Внесение денег. В отличие от balance_history (снимок остатка) это
-  -- операция поступления. Комментарий обязателен: CHECK не даёт записать
-  -- пустой, даже если проверку на клиенте обойти.
+  -- операция поступления. Категория обязательна — её отсутствие проверяет
+  -- сам слой внесения (db:addDeposit), CHECK здесь невозможен, потому что
+  -- ссылка на справочник не гарантирует непустоту и разрешает NULL.
   CREATE TABLE IF NOT EXISTS deposits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     amount REAL NOT NULL CHECK (amount > 0),
     date TEXT NOT NULL,
-    note TEXT NOT NULL CHECK (length(trim(note)) > 0),
+    category_id INTEGER REFERENCES deposit_categories(id),
+    -- Историческое. Комментарий превратился в категорию, текст переехал в
+    -- deposit_categories.name, но оригинал оставлен на месте: при объединении
+    -- «зарплата» и «Зарплата » именно здесь сохранилась разница формулировок.
+    note TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
   CREATE INDEX IF NOT EXISTS idx_balance_date ON balance_history(date);
   CREATE INDEX IF NOT EXISTS idx_deposits_date ON deposits(date);
+  -- Индекс по category_id создаётся не здесь, а после migrateDepositNotesToCategories:
+  -- на старой БД колонки category_id ещё нет, и CREATE INDEX упал бы с
+  -- «no such column». На новой БД он создаётся там же, в конце applySchema.
 
   -- Служебные настройки. Ключ deleted_default:<имя> означает, что встроенную
   -- категорию удалили намеренно, и создавать её при следующем старте не надо.
@@ -136,6 +159,129 @@ export const ZAKUP_SUBCATEGORIES = [
   'Вода',
   'Камшат',
 ];
+
+/** Статистика переноса комментариев внесений в категории */
+export interface DepositNoteMigrationResult {
+  /** Сколько категорий создано */
+  categoriesCreated: number;
+  /** Сколько внесений получили категорию */
+  depositsLinked: number;
+  /** Сколько внесений было с одинаковым комментарием и слилось в одну категорию */
+  depositsMerged: number;
+}
+
+/**
+ * Превращает комментарий внесения в категорию справочника.
+ *
+ * Одинаковые комментарии объединяются: сравнение идёт без учёта регистра и
+ * лишних пробелов, в качестве названия категории берётся первая встреченная
+ * формулировка. «зарплата », «Зарплата» и «ЗАРПЛАТА» станут одной категорией.
+ *
+ * Таблицу приходится пересоздавать: в старой схеме note — NOT NULL с
+ * CHECK (length(trim(note)) > 0), из-за чего нельзя записать внесение без
+ * комментария. ALTER TABLE в SQLite не умеет снимать эти ограничения.
+ *
+ * Повторный запуск безопасен — миграция определяется по самой схеме
+ * (note NOT NULL), а не по флажку в settings.
+ */
+export function migrateDepositNotesToCategories(
+  database: Database
+): DepositNoteMigrationResult | null {
+  const cols = database.prepare('PRAGMA table_info(deposits)').all() as {
+    name: string;
+    notnull: number;
+  }[];
+  const noteCol = cols.find((c) => c.name === 'note');
+  const hasCategoryColumn = cols.some((c) => c.name === 'category_id');
+
+  // Уже новая схема — переносить нечего.
+  if (!noteCol || noteCol.notnull !== 1 || hasCategoryColumn) return null;
+
+  const rows = database
+    .prepare(`SELECT id, note FROM deposits WHERE note IS NOT NULL AND trim(note) <> ''`)
+    .all() as { id: number; note: string }[];
+
+  // Схлопываем комментарии по нормализованному ключу. Ключи сортируем по id,
+  // чтобы при недетерминированном порядке выборки название категории не «прыгал».
+  const normalized = new Map<string, { name: string; ids: number[] }>();
+  for (const row of rows) {
+    const name = row.note.trim().replace(/\s+/g, ' ');
+    const key = name.toLowerCase();
+    const existing = normalized.get(key);
+    if (existing) existing.ids.push(row.id);
+    else normalized.set(key, { name, ids: [row.id] });
+  }
+
+  const result: DepositNoteMigrationResult = {
+    categoriesCreated: normalized.size,
+    depositsLinked: rows.length,
+    depositsMerged: rows.length - normalized.size,
+  };
+
+  const migrate = database.transaction(() => {
+    const insertCategory = database.prepare(
+      `INSERT INTO deposit_categories (name, sort_order) VALUES (?, ?)`
+    );
+    let order = 0;
+    // normalized уже содержит по одной записи на уникальный ключ,
+    // поэтому обычный INSERT — без IGNORE и без гонок.
+    for (const entry of normalized.values()) insertCategory.run(entry.name, ++order);
+
+    // category_id в старой таблице нет — сначала добавляем колонку,
+    // затем переливаем данные и переименовываем.
+    database.exec(`ALTER TABLE deposits ADD COLUMN category_id INTEGER`);
+    database.exec(`
+      CREATE TABLE deposits_v2 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        amount REAL NOT NULL CHECK (amount > 0),
+        date TEXT NOT NULL,
+        category_id INTEGER REFERENCES deposit_categories(id),
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    // note переносим как есть — это историческая копия формулировки,
+    // а category_id ставим точным UPDATE по id, чтобы не зависеть от
+    // совпадения выражений нормализации между JS и SQL.
+    database.exec(`
+      INSERT INTO deposits_v2 (id, amount, date, category_id, note, created_at)
+      SELECT id, amount, date, NULL, note, created_at FROM deposits
+    `);
+
+    const findCategory = database.prepare(
+      `SELECT id, name FROM deposit_categories`
+    );
+    const setCategory = database.prepare(`UPDATE deposits_v2 SET category_id = ? WHERE id = ?`);
+    const byId = new Map(
+      (findCategory.all() as { id: number; name: string }[]).map((c) => [c.id, c])
+    );
+    // Ищем по нормализованному ключу в JS: SQLite без ICU не умеет
+    // сравнивать кириллицу без учёта регистра (см. комментарий в SCHEMA_SQL).
+    const byName = new Map<string, number>();
+    for (const c of byId.values()) byName.set(c.name.trim().toLowerCase(), c.id);
+
+    for (const entry of normalized.values()) {
+      const catId = byName.get(entry.name.toLowerCase());
+      if (!catId) continue;
+      for (const id of entry.ids) setCategory.run(catId, id);
+    }
+
+    database.exec(`DROP TABLE deposits`);
+    database.exec(`ALTER TABLE deposits_v2 RENAME TO deposits`);
+    // Индексы создавались на старой таблице и исчезли вместе с ней.
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_deposits_date ON deposits(date);
+      CREATE INDEX IF NOT EXISTS idx_deposits_category ON deposits(category_id);
+    `);
+  });
+  migrate();
+
+  console.log(
+    `[schema] Комментарии внесений → категории: ${result.categoriesCreated} категорий, ` +
+      `${result.depositsLinked} внесений, из них ${result.depositsMerged} объединено с дублями`
+  );
+  return result;
+}
 
 /**
  * Создаёт схему и наполняет БД дефолтными категориями.
@@ -275,4 +421,12 @@ export function applySchema(database: Database): void {
       insertSubcategory.run(categoryMap['Закуп'], sub, idx + 1);
     });
   }
+
+  // Комментарии внесений становятся справочником категорий.
+  migrateDepositNotesToCategories(database);
+
+  // Создаётся после миграции: на старой БД колонки category_id до неё нет.
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_deposits_category ON deposits(category_id);
+  `);
 }

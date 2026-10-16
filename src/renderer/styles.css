@@ -1041,6 +1041,82 @@ input::placeholder {
   text-align: right;
 }
 
+/* Разделитель и заголовок секций внутри модальных окон */
+.section-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 22px 0 18px;
+}
+
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.category-list-manage {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.manage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.manage-row:hover {
+  background: var(--bg-hover);
+}
+
+.manage-name {
+  flex: 1;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.manage-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.empty-hint {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+}
+
+/* Создание категории прямо в форме (например, внесения) */
+.inline-create {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.inline-create input {
+  flex: 1;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+
+.inline-create .btn {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
 /* ——— Выбор цвета категории ——— */
 .color-picker {
   display: flex;
@@ -1211,6 +1287,33 @@ input::placeholder {
   padding-left: 40px;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+/* Итоги внесений по категориям под таблицей внесений */
+.deposit-totals {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.deposit-total-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.deposit-total-name {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.deposit-total-sum {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .export-btn {

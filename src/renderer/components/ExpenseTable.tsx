@@ -278,7 +278,7 @@ export default function ExpenseTable({
             <thead>
               <tr>
                 <th style={{ width: 90 }}>Дата</th>
-                <th>Комментарий</th>
+                <th>Категория</th>
                 <th style={{ textAlign: 'right', width: 160 }}>Сумма</th>
                 <th style={{ width: 50 }}></th>
               </tr>
@@ -298,7 +298,9 @@ export default function ExpenseTable({
                         <Banknote size={13} />
                         Внесение
                       </span>
-                      <span style={{ color: 'var(--text-primary)' }}>{deposit.note}</span>
+                      <span style={{ color: 'var(--text-primary)' }}>
+                        {deposit.category_name || 'Без категории'}
+                      </span>
                     </div>
                   </td>
                   <td

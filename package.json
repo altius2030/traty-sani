@@ -1,7 +1,7 @@
 {
   "name": "traty-sani",
   "productName": "Траты Сани",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Траты Сани: учёт расходов, внесений, остатка и отчёты за период",
   "main": "dist/main/main.js",
   "author": "Траты Сани",

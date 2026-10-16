@@ -48,12 +48,25 @@ export interface BalanceRecord {
   note: string | null;
 }
 
+/**
+ * Категория внесения. До 1.0.8 роль этой справочника играл свободный
+ * комментарий; теперь одинаковые комментарии схлопываются в одну категорию.
+ */
+export interface DepositCategory {
+  id: number;
+  name: string;
+  sort_order: number;
+  /** Сколько внесений ссылается на категорию */
+  deposits_count?: number;
+}
+
 export interface Deposit {
   id: number;
   amount: number;
   date: string;
-  /** Комментарий обязателен */
-  note: string;
+  category_id: number | null;
+  /** Название категории; null, если категория была удалена */
+  category_name: string | null;
   created_at?: string;
 }
 
@@ -76,6 +89,8 @@ export interface Report {
   expenses: Expense[];
   deposits: Deposit[];
   byCategory: Record<string, CategoryBreakdown>;
+  /** Внесения, сгруппированные по категориям внесений */
+  byDepositCategory: Record<string, number>;
   period: { startDate: string; endDate: string };
 }
 

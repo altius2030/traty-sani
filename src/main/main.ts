@@ -506,30 +506,94 @@ ipcMain.handle('db:deleteBalance', (_, id: number) => {
 // ——— Внесения денег ———
 ipcMain.handle('db:getDeposits', (_, { startDate, endDate }: { startDate: string; endDate: string }) => {
   return db!.prepare(`
-    SELECT * FROM deposits
-    WHERE date(date) BETWEEN date(?) AND date(?)
-    ORDER BY date(date) DESC, created_at DESC
+    SELECT d.*, c.name as category_name
+    FROM deposits d
+    LEFT JOIN deposit_categories c ON d.category_id = c.id
+    WHERE date(d.date) BETWEEN date(?) AND date(?)
+    ORDER BY date(d.date) DESC, d.created_at DESC
   `).all(startDate, endDate);
 });
 
-ipcMain.handle('db:addDeposit', (_, deposit: { amount: number; date: string; note: string }) => {
-  // Валидация на сервере: комментарий обязателен (дублируем CHECK из схемы)
+// ——— Категории внесений ———
+ipcMain.handle('db:getDepositCategories', () => {
+  return db!.prepare(`
+    SELECT c.*, (
+      SELECT COUNT(*) FROM deposits d WHERE d.category_id = c.id
+    ) as deposits_count
+    FROM deposit_categories c
+    ORDER BY c.sort_order, c.name
+  `).all();
+});
+
+ipcMain.handle('db:addDepositCategory', (_, name: string) => {
+  const clean = (name || '').trim().replace(/\s+/g, ' ');
+  if (!clean) throw new Error('Название категории внесения не может быть пустым');
+
+  // Сравнение без учёта регистра делаем в JS: better-sqlite3 собран без ICU,
+  // поэтому NOCASE и lower() в SQLite не различают «зарплата» и «Зарплата»,
+  // и UNIQUE на name такие дубли не отсекает.
+  const create = db!.transaction((finalName: string) => {
+    const all = db!
+      .prepare(`SELECT id, name FROM deposit_categories`)
+      .all() as { id: number; name: string }[];
+    const target = finalName.toLowerCase();
+    const existing = all.find((c) => c.name.trim().toLowerCase() === target);
+    if (existing) return { id: existing.id, name: existing.name };
+
+    const order = db!
+      .prepare(`SELECT COALESCE(MAX(sort_order), 0) + 1 AS next FROM deposit_categories`)
+      .get() as { next: number };
+    const result = db!
+      .prepare(`INSERT INTO deposit_categories (name, sort_order) VALUES (?, ?)`)
+      .run(finalName, order.next);
+    return { id: result.lastInsertRowid, name: finalName };
+  });
+  return create(clean);
+});
+
+ipcMain.handle('db:deleteDepositCategory', (_, id: number) => {
+  // Внесения не удаляем — терять деньги из-за удаления справочника нельзя.
+  // Категория у них просто пропадает, суммы и даты остаются.
+  const run = db!.transaction((catId: number) => {
+    db!.prepare(`UPDATE deposits SET category_id = NULL WHERE category_id = ?`).run(catId);
+    db!.prepare(`DELETE FROM deposit_categories WHERE id = ?`).run(catId);
+  });
+  run(id);
+  return { success: true };
+});
+
+ipcMain.handle('db:addDeposit', (_, deposit: { amount: number; date: string; categoryId: number }) => {
+  // Валидация на сервере: дублируем проверки из UI, чтобы обойти их было нельзя.
   const amount = Number(deposit.amount);
-  const note = (deposit.note || '').trim();
+  const categoryId = Number(deposit.categoryId);
 
   if (!Number.isFinite(amount) || amount <= 0) {
     throw new Error('Сумма внесения должна быть больше нуля');
   }
-  if (!note) {
-    throw new Error('Укажите комментарий к внесению');
+  if (!Number.isFinite(categoryId) || categoryId <= 0) {
+    throw new Error('Выберите категорию внесения');
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(deposit.date || '')) {
     throw new Error('Некорректная дата');
   }
+  const category = db!
+    .prepare(`SELECT name FROM deposit_categories WHERE id = ?`)
+    .get(categoryId) as { name: string } | undefined;
+  if (!category) {
+    throw new Error('Категория внесения не найдена');
+  }
 
-  const stmt = db!.prepare('INSERT INTO deposits (amount, date, note) VALUES (?, ?, ?)');
-  const result = stmt.run(amount, deposit.date, note);
-  return { id: result.lastInsertRowid, amount, date: deposit.date, note };
+  const stmt = db!.prepare(
+    `INSERT INTO deposits (amount, date, category_id) VALUES (?, ?, ?)`
+  );
+  const result = stmt.run(amount, deposit.date, categoryId);
+  return {
+    id: result.lastInsertRowid,
+    amount,
+    date: deposit.date,
+    category_id: categoryId,
+    category_name: category.name,
+  };
 });
 
 ipcMain.handle('db:deleteDeposit', (_, id: number) => {
@@ -576,7 +640,22 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     subitem_name?: string | null;
     date: string;
   }>;
-  let deposits: Array<{ amount: number; date: string; note: string }>;
+  let deposits: Array<{
+    amount: number;
+    date: string;
+    category_id?: number | null;
+    category_name?: string | null;
+  }>;
+
+  const DEPOSIT_SELECT = `
+    SELECT d.*, c.name as category_name
+    FROM deposits d
+    LEFT JOIN deposit_categories c ON d.category_id = c.id`;
+  // AFTER_CP написан без алиасов — после JOIN колонка date станет неоднозначной.
+  const DEPOSIT_AFTER_CP = `(
+      date(d.date) > ?
+   OR (date(d.date) = ? AND d.created_at > ?)
+  ) AND date(d.date) <= ?`;
 
   if (cpInPeriod) {
     startAmount = cpInPeriod.amount;
@@ -587,8 +666,8 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
        ORDER BY date(e.date) DESC`
     ).all(cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate) as typeof expenses;
     deposits = db!.prepare(
-      `SELECT * FROM deposits WHERE ${AFTER_CP}
-       ORDER BY date(date) DESC, created_at DESC`
+      `${DEPOSIT_SELECT} WHERE ${DEPOSIT_AFTER_CP}
+       ORDER BY date(d.date) DESC, d.created_at DESC`
     ).all(cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate) as typeof deposits;
   } else {
     const start = getDerivedBalanceAt(startDate);
@@ -600,9 +679,9 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
        ORDER BY date(e.date) DESC`
     ).all(startDate, endDate) as typeof expenses;
     deposits = db!.prepare(
-      `SELECT * FROM deposits
-       WHERE date(date) BETWEEN date(?) AND date(?)
-       ORDER BY date(date) DESC, created_at DESC`
+      `${DEPOSIT_SELECT}
+       WHERE date(d.date) BETWEEN date(?) AND date(?)
+       ORDER BY date(d.date) DESC, d.created_at DESC`
     ).all(startDate, endDate) as typeof deposits;
   }
 
@@ -643,6 +722,15 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     }
   >);
 
+  // Внесения по категориям — тот же принцип, что и у трат.
+  // Внесения без категории возможны только после удаления категории,
+  // поэтому для них отдельный ключ, чтобы сумма не потерялась.
+  const byDepositCategory = deposits.reduce((acc, d) => {
+    const key = d.category_name || 'Без категории';
+    acc[key] = (acc[key] || 0) + d.amount;
+    return acc;
+  }, {} as Record<string, number>);
+
   return {
     startBalance: startAmount,
     // Деньги на выходе: после всех внесений и вычетов
@@ -653,6 +741,7 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     expenses,
     deposits,
     byCategory,
+    byDepositCategory,
     period: { startDate, endDate },
   };
 });

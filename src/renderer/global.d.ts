@@ -1,3 +1,5 @@
+import type { DepositCategory } from './types';
+
 export interface ElectronAPI {
   /** 'win32' | 'darwin' | 'linux' */
   readonly platform: string;
@@ -37,8 +39,11 @@ export interface ElectronAPI {
   }): Promise<any>;
   deleteBalance(id: number): Promise<{ success: boolean }>;
   getDeposits(startDate: string, endDate: string): Promise<any[]>;
-  addDeposit(deposit: { amount: number; date: string; note: string }): Promise<any>;
+  addDeposit(deposit: { amount: number; date: string; categoryId: number }): Promise<any>;
   deleteDeposit(id: number): Promise<{ success: boolean }>;
+  getDepositCategories(): Promise<DepositCategory[]>;
+  addDepositCategory(name: string): Promise<{ id: number; name: string }>;
+  deleteDepositCategory(id: number): Promise<{ success: boolean }>;
   getReport(startDate: string, endDate: string): Promise<any>;
   saveFile(
     defaultPath: string,

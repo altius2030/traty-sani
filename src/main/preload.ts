@@ -34,9 +34,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteBalance: (id: number) => ipcRenderer.invoke('db:deleteBalance', id),
 
   getDeposits: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getDeposits', { startDate, endDate }),
-  addDeposit: (deposit: { amount: number; date: string; note: string }) => 
+  addDeposit: (deposit: { amount: number; date: string; categoryId: number }) =>
     ipcRenderer.invoke('db:addDeposit', deposit),
   deleteDeposit: (id: number) => ipcRenderer.invoke('db:deleteDeposit', id),
+  getDepositCategories: () => ipcRenderer.invoke('db:getDepositCategories'),
+  addDepositCategory: (name: string) => ipcRenderer.invoke('db:addDepositCategory', name),
+  deleteDepositCategory: (id: number) => ipcRenderer.invoke('db:deleteDepositCategory', id),
   
   getReport: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getReport', { startDate, endDate }),
   saveFile: (defaultPath: string, content: string) => ipcRenderer.invoke('dialog:saveFile', defaultPath, content),
