@@ -1,4 +1,10 @@
-import type { DepositCategory } from './types';
+import type {
+  DepositCategory,
+  Expense,
+  Deposit,
+  RecurringItem,
+  RecurringFrequency,
+} from './types';
 
 export type UpdateState =
   | 'idle'
@@ -55,6 +61,41 @@ export interface ElectronAPI {
     note?: string;
   }): Promise<any>;
   deleteExpense(id: number): Promise<{ success: boolean }>;
+  /** Возвращает удалённую трату с прежним id — для отмены удаления */
+  restoreExpense(expense: Expense): Promise<{ success: boolean }>;
+  restoreDeposit(deposit: Deposit): Promise<{ success: boolean }>;
+
+  // ——— Регулярные платежи ———
+  getDueRecurring(): Promise<RecurringItem[]>;
+  getRecurring(): Promise<RecurringItem[]>;
+  addRecurring(p: {
+    title: string;
+    categoryId: number;
+    subcategoryId?: number;
+    amount: number;
+    frequency: RecurringFrequency;
+    nextDate: string;
+  }): Promise<{ success: boolean; id: number }>;
+  updateRecurring(
+    id: number,
+    patch: Partial<{
+      title: string;
+      amount: number;
+      frequency: RecurringFrequency;
+      nextDate: string;
+      isActive: boolean;
+    }>
+  ): Promise<{ success: boolean; message?: string }>;
+  deleteRecurring(id: number): Promise<{ success: boolean }>;
+  /** Создаёт трату и сдвигает платёж на следующий период */
+  payRecurring(id: number): Promise<{
+    success: boolean;
+    message?: string;
+    nextDate?: string;
+    expenseDate?: string;
+  }>;
+  /** Сколько постоянных расходов выходит в среднем за месяц */
+  getRecurringMonthlyTotal(): Promise<number>;
   getBalanceHistory(): Promise<any[]>;
   getCurrentBalance(): Promise<{ balance: number; base: number; baseDate: string | null }>;
   addBalance(balance: {

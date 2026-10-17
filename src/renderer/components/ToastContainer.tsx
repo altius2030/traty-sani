@@ -26,6 +26,17 @@ export default function ToastContainer({ toasts, onDismiss }: ToastProps) {
         <div key={toast.id} className={`toast ${toast.type}`} role="status">
           {getIcon(toast.type)}
           <div className="toast-message">{toast.message}</div>
+          {toast.actionLabel && (
+            <button
+              className="toast-action"
+              onClick={() => {
+                toast.onAction?.();
+                onDismiss(toast.id);
+              }}
+            >
+              {toast.actionLabel}
+            </button>
+          )}
           <button
             className="modal-close"
             onClick={() => onDismiss(toast.id)}

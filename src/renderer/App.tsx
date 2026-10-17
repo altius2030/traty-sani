@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, Save, RefreshCw, Sun, Moon } from 'lucide-react';
+import { Wallet, Save, RefreshCw, Sun, Moon, Repeat } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import ExpenseTable from './components/ExpenseTable';
 import AddExpenseModal, {
@@ -13,6 +13,7 @@ import ReportModal from './components/ReportModal';
 import { buildChartCsv } from './components/ReportCharts';
 import { depositColorMap, expenseColorMap } from './lib/reportColors';
 import ToastContainer from './components/ToastContainer';
+import { RecurringModal } from './components/Recurring';
 import type {
   DepositCategory,
   Category,
@@ -24,6 +25,7 @@ import type {
   Toast,
   ToastType,
   UpdateStatus,
+  RecurringItem,
 } from './types';
 import type { MainTab } from './components/ExpenseTable';
 import {
@@ -108,6 +110,16 @@ function App() {
   const fileMenuRef = useRef<HTMLDivElement>(null);
   const [theme, setTheme] = useState<Theme>(readStoredTheme);
 
+  // Фильтр таблицы. Хранится текстом, а не распарсенным числом: во время
+  // набора поле не должно прыгать, а пустая строка — это «без ограничения»
+  const [tableFilter, setTableFilter] = useState({ text: '', min: '', max: '' });
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // ——— Регулярные платежи ———
+  const [recurring, setRecurring] = useState<RecurringItem[]>([]);
+  const [dueRecurring, setDueRecurring] = useState<RecurringItem[]>([]);
+  const [recurringMonthly, setRecurringMonthly] = useState(0);
+
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next: Theme = prev === 'dark' ? 'light' : 'dark';
@@ -127,27 +139,65 @@ function App() {
     | { type: 'categories' }
     | { type: 'report' }
     | { type: 'update' }
+    | { type: 'repeatExpense'; expense: Expense }
+    | { type: 'repeatDeposit'; deposit: Deposit }
+    | { type: 'recurring' }
     | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<
     | {
-        kind: 'expense' | 'deposit' | 'category' | 'subcategory' | 'subitem';
+        kind:
+          | 'expense'
+          | 'deposit'
+          | 'category'
+          | 'subcategory'
+          | 'subitem'
+          | 'recurring';
         id: number;
         impact?: { expenses: number; subcategories: number; subitems?: number };
+        /** Название регулярного платежа — для понятного вопроса */
+        title?: string;
       }
     | null
   >(null);
 
   // ——— Уведомления ———
-  const addToast = useCallback((message: string, type: ToastType = 'success') => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+  const addToast = useCallback(
+    (message: string, type: ToastType = 'success', options?: { actionLabel?: string; onAction?: () => void; duration?: number }) => {
+      const id = Date.now() + Math.random();
+      // С кнопкой отмены живём дольше обычного: 4 секунды на нажатие
+      // «Отменить» — слишком мало, действие терялось бы чаще, чем срабатывало
+      const life = options?.duration ?? (options?.actionLabel ? 8000 : 4000);
+      setToasts((prev) => [
+        ...prev,
+        { id, type, message, actionLabel: options?.actionLabel, onAction: options?.onAction },
+      ]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, life);
+    },
+    []
+  );
+
+  /**
+ * Загрузка регулярных платежей.
+ *
+ * Подтягиваются два списка: все (для окна настройки) и только наступившие
+ * (для боковой панели). Сумма за месяц считается на сервере — там же
+ * переводится «ежедневно» в месяц, иначе эти правила разошлись бы.
+ */
+const loadRecurring = useCallback(async () => {
+    const [all, due, monthly] = await Promise.all([
+      window.electronAPI.getRecurring(),
+      window.electronAPI.getDueRecurring(),
+      window.electronAPI.getRecurringMonthlyTotal(),
+    ]);
+    setRecurring(all);
+    setDueRecurring(due);
+    setRecurringMonthly(monthly);
   }, []);
 
-  // ——— Загрузка данных ———
+  // Загрузка данных ———
   const loadCategories = useCallback(async () => {
     const data = await window.electronAPI.getCategories();
     const normalized = data.map((c: any) => ({
@@ -167,6 +217,62 @@ function App() {
     setDeposits(depositData);
     setLoading(false);
   }, []);
+
+  /**
+   * Фильтрация выполняется в памяти: период уже загружен целиком, а
+   * запрос к базе на каждый ввод буквы только тормозил бы.
+   *
+   * Итоги в шапке считаются по отфильтрованным данным — так сумма на
+   * экране соответствует тому, что видно в таблице.
+   */
+  const matchesFilter = useCallback(
+    (
+      row: {
+        amount: number;
+        note?: string | null;
+        category_name?: string | null;
+        subcategory_name?: string | null;
+        subitem_name?: string | null;
+      },
+      f: { text: string; min: string; max: string }
+    ) => {
+      const min = f.min === '' ? null : Number(f.min);
+      const max = f.max === '' ? null : Number(f.max);
+      if (min !== null && row.amount < min) return false;
+      if (max !== null && row.amount > max) return false;
+
+      const needle = f.text.trim().toLowerCase();
+      if (needle === '') return true;
+
+      // Пробел в запросе означает «любые слова в любом порядке»: пользователь
+      // печатает «курт женское» и ждёт оба слова, а не точное совпадение
+      const haystack = [row.note, row.category_name, row.subcategory_name, row.subitem_name]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      // Сумму тоже ищем: «500» находит трату на 500
+      if (haystack.includes(needle)) return true;
+      if (String(row.amount).includes(needle)) return true;
+      return needle.split(/\s+/).every((word) => haystack.includes(word));
+    },
+    []
+  );
+
+  const visibleExpenses = useMemo(
+    () => expenses.filter((e) => matchesFilter(e, tableFilter)),
+    [expenses, tableFilter, matchesFilter]
+  );
+
+  const visibleDeposits = useMemo(
+    () => deposits.filter((d) => matchesFilter(d, tableFilter)),
+    [deposits, tableFilter, matchesFilter]
+  );
+
+  const hiddenCount =
+    activeTab === 'expenses'
+      ? expenses.length - visibleExpenses.length
+      : deposits.length - visibleDeposits.length;
 
   const loadBalances = useCallback(async () => {
     const balance = await window.electronAPI.getCurrentBalance();
@@ -188,6 +294,7 @@ function App() {
           loadExpenses(period),
           loadBalances(),
           loadDepositCategories(),
+          loadRecurring(),
         ]);
       } catch (err) {
         console.error('Ошибка загрузки:', err);
@@ -195,13 +302,61 @@ function App() {
         setLoading(false);
       }
     })();
-  }, [loadCategories, loadExpenses, loadBalances]);
+  }, [loadCategories, loadExpenses, loadBalances, loadRecurring]);
 
   useEffect(() => {
     loadExpenses(period).catch(() => {});
   }, [period, loadExpenses]);
 
-  // Меню «Файл» закрывается по клику вне и по Escape. Проверка попадания
+  /**
+ * Горячие клавиши.
+ *
+ * Ctrl+N — трата, Ctrl+D — внесение, Ctrl+F — поиск, Esc — закрыть окно.
+ * Ctrl+N в браузере создаёт новое окно, поэтому его и перехватываем.
+ *
+ * Клавиши не срабатывают, если фокус в поле ввода и нажат букваный модификатор
+ * с Shift: иначе Ctrl+Shift+D не смог бы набрать заглавную букву в поле.
+ */
+useEffect(() => {
+  const onKeyDown = (e: KeyboardEvent) => {
+    // Escape работает всегда: закрывает и окно, и выпадающее меню
+    if (e.key === 'Escape') {
+      setFileMenuOpen(false);
+      if (modal) setModal(null);
+      return;
+    }
+
+    if (!e.ctrlKey && !e.metaKey) return;
+    if (e.altKey) return;
+
+    const key = e.key.toLowerCase();
+
+    if (key === 'f') {
+      // Поиск всегда доступен: он не зависит от открытого окна
+      e.preventDefault();
+      searchRef.current?.focus();
+      searchRef.current?.select();
+      return;
+    }
+
+    // Букваные сочетания не должны мешать набору текста
+    if (e.shiftKey) return;
+    if (modal) return;
+
+    if (key === 'n') {
+      e.preventDefault();
+      setModal({ type: 'expense' });
+    } else if (key === 'd') {
+      e.preventDefault();
+      setModal({ type: 'deposit' });
+    }
+  };
+
+  document.addEventListener('keydown', onKeyDown);
+  return () => document.removeEventListener('keydown', onKeyDown);
+}, [modal]);
+
+// Меню «Файл» закрывается по клику вне и по Escape. Проверка попадания
   // внутрь нужна и для самой кнопки: иначе mousedown по ней закрыл бы меню,
   // и следующий click тут же открыл бы его снова.
   useEffect(() => {
@@ -231,14 +386,17 @@ function App() {
     return off;
   }, []);
 
+  // Итоги считаем по отфильтрованным данным: тогда сумма в шапке всегда
+  // соответствует тому, что реально видно в таблице. С фильтром она
+  // относится к найденному, без фильтра — ко всему периоду.
   const totalExpenses = useMemo(
-    () => expenses.reduce((sum, e) => sum + e.amount, 0),
-    [expenses]
+    () => visibleExpenses.reduce((sum, e) => sum + e.amount, 0),
+    [visibleExpenses]
   );
 
   const totalDeposits = useMemo(
-    () => deposits.reduce((sum, d) => sum + d.amount, 0),
-    [deposits]
+    () => visibleDeposits.reduce((sum, d) => sum + d.amount, 0),
+    [visibleDeposits]
   );
 
   // ——— Действия ———
@@ -333,6 +491,33 @@ function App() {
     setConfirmDelete({ kind: 'deposit', id });
   };
 
+  /**
+   * Отмена удаления операции.
+   *
+   * Запись достаётся из уже загруженного списка ДО удаления: после
+   * deleteExpense повторный запрос вернул бы пустоту. Если запись вдруг не
+   * нашлась, восстанавливать нечего — молча выходим, чтобы не показать
+   * несуществующую кнопку «Отменить».
+   */
+  const undoDelete = useCallback(
+    async (
+      restore: () => Promise<unknown>,
+      reload: () => Promise<unknown>
+    ) => {
+      try {
+        await restore();
+        await reload();
+        addToast('Восстановлено', 'success');
+      } catch (err) {
+        addToast(
+          err instanceof Error ? err.message : 'Не удалось восстановить запись',
+          'error'
+        );
+      }
+    },
+    [addToast]
+  );
+
   /** Считаем, сколько трат и подкатегорий исчезнет вместе с удалением */
   const askDelete = async (kind: 'category' | 'subcategory', id: number) => {
     const impact = await window.electronAPI.getDeleteImpact(kind, id);
@@ -345,13 +530,38 @@ function App() {
     setConfirmDelete(null);
 
     if (kind === 'expense') {
+      // Список нужен, чтобы найти саму трату: после удаления её в нём не будет
+      const removed = expenses.find((e) => e.id === id);
       await window.electronAPI.deleteExpense(id);
-      addToast('Трата удалена', 'info');
       await Promise.all([loadExpenses(period), loadBalances()]);
+      if (!removed) {
+        addToast('Трата удалена', 'info');
+        return;
+      }
+      addToast('Трата удалена', 'info', {
+        actionLabel: 'Отменить',
+        onAction: () =>
+          undoDelete(
+            () => window.electronAPI.restoreExpense(removed),
+            () => Promise.all([loadExpenses(period), loadBalances()]).then(() => undefined)
+          ),
+      });
     } else if (kind === 'deposit') {
+      const removed = deposits.find((d) => d.id === id);
       await window.electronAPI.deleteDeposit(id);
-      addToast('Внесение удалено', 'info');
       await Promise.all([loadExpenses(period), loadBalances()]);
+      if (!removed) {
+        addToast('Внесение удалено', 'info');
+        return;
+      }
+      addToast('Внесение удалено', 'info', {
+        actionLabel: 'Отменить',
+        onAction: () =>
+          undoDelete(
+            () => window.electronAPI.restoreDeposit(removed),
+            () => Promise.all([loadExpenses(period), loadBalances()]).then(() => undefined)
+          ),
+      });
     } else if (kind === 'category') {
       await window.electronAPI.deleteCategory(id);
       addToast('Категория удалена', 'info');
@@ -364,6 +574,12 @@ function App() {
       await window.electronAPI.deleteSubitem(id);
       addToast('Статья удалена', 'info');
       await loadCategories();
+    } else if (kind === 'recurring') {
+      // Траты, созданные этим платежом, остаются: удаляется только
+      // напоминание, а не сама история расходов
+      await window.electronAPI.deleteRecurring(id);
+      addToast('Платёж удалён', 'info');
+      await loadRecurring();
     }
   };
 
@@ -438,6 +654,60 @@ function App() {
   };
 
   // Отчёт загружается внутри ReportModal, здесь только открываем окно
+  /**
+ * Отметка «оплачено» по регулярному платежу.
+ *
+ * Сервер одной транзакцией создаёт трату и двигает платёж на следующий
+ * период, поэтому сюда остаётся только перезагрузить данные и показать,
+ * на какую дату платёж переехал.
+ */
+const handlePayRecurring = async (id: number) => {
+    try {
+      const result = await window.electronAPI.payRecurring(id);
+      if (!result.success) {
+        addToast(result.message || 'Не удалось отметить платёж', 'error');
+        return;
+      }
+      await Promise.all([loadRecurring(), loadExpenses(period), loadBalances()]);
+      const when = result.nextDate
+        ? new Date(result.nextDate).toLocaleDateString('ru-RU', {
+            day: '2-digit',
+            month: '2-digit',
+          })
+        : '';
+      addToast(`Трата создана, следующий платёж ${when}`, 'success');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Не удалось отметить платёж', 'error');
+    }
+  };
+
+  const handleAddRecurring = async (
+    payload: Parameters<typeof window.electronAPI.addRecurring>[0]
+  ) => {
+    const res = await window.electronAPI.addRecurring(payload);
+    if (res.success) {
+      await loadRecurring();
+      addToast('Платёж добавлен', 'success');
+    }
+    return res;
+  };
+
+  const handleUpdateRecurring = async (
+    id: number,
+    patch: Parameters<typeof window.electronAPI.updateRecurring>[1]
+  ) => {
+    const res = await window.electronAPI.updateRecurring(id, patch);
+    if (res.success) {
+      await loadRecurring();
+      // Простое переключение показываем отдельно, а правку формы — нет:
+      // там пользователь и так видит, что сохранил
+      if (Object.keys(patch).length === 1 && 'isActive' in patch) {
+        addToast(patch.isActive ? 'Платёж включён' : 'Платёж выключен', 'info');
+      }
+    }
+    return res;
+  };
+
   const handleOpenReport = () => {
     setModal({ type: 'report' });
   };
@@ -682,6 +952,37 @@ const handleOpenReleases = async () => {
                 <RefreshCw size={15} />
                 Проверить обновление
               </button>
+              <button
+                className="file-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenuOpen(false);
+                  setModal({ type: 'recurring' });
+                }}
+              >
+                <Repeat size={15} />
+                Регулярные платежи
+              </button>
+              <div className="file-menu-separator" />
+              <div className="file-menu-shortcuts">
+                <div className="file-menu-shortcuts-title">Горячие клавиши</div>
+                <div className="file-menu-shortcut">
+                  <span>Новая трата</span>
+                  <kbd>Ctrl+N</kbd>
+                </div>
+                <div className="file-menu-shortcut">
+                  <span>Новое внесение</span>
+                  <kbd>Ctrl+D</kbd>
+                </div>
+                <div className="file-menu-shortcut">
+                  <span>Поиск</span>
+                  <kbd>Ctrl+F</kbd>
+                </div>
+                <div className="file-menu-shortcut">
+                  <span>Закрыть окно</span>
+                  <kbd>Esc</kbd>
+                </div>
+              </div>
               <div className="file-menu-footer">
                 Траты Сани v{__APP_VERSION__}
               </div>
@@ -721,12 +1022,16 @@ const handleOpenReleases = async () => {
           onOpenCategoryManager={() => setModal({ type: 'categories' })}
           onDeleteCategory={(id) => askDelete('category', id)}
           onDeleteSubcategory={(id) => askDelete('subcategory', id)}
+          recurring={dueRecurring}
+          recurringMonthly={recurringMonthly}
+          onPayRecurring={handlePayRecurring}
+          onOpenRecurringManager={() => setModal({ type: 'recurring' })}
         />
 
         <ExpenseTable
           activeTab={activeTab}
-          expenses={expenses}
-          deposits={deposits}
+          expenses={visibleExpenses}
+          deposits={visibleDeposits}
           period={period}
           totalExpenses={totalExpenses}
           totalDeposits={totalDeposits}
@@ -740,6 +1045,12 @@ const handleOpenReleases = async () => {
           onAddExpense={() => setModal({ type: 'expense' })}
           onAddDeposit={() => setModal({ type: 'deposit' })}
           onOpenReport={handleOpenReport}
+          onRepeatExpense={(expense) => setModal({ type: 'repeatExpense', expense })}
+          onRepeatDeposit={(deposit) => setModal({ type: 'repeatDeposit', deposit })}
+          filter={tableFilter}
+          onFilterChange={setTableFilter}
+          searchRef={searchRef}
+          hiddenCount={hiddenCount}
         />
       </div>
 
@@ -755,9 +1066,36 @@ const handleOpenReleases = async () => {
         />
       )}
 
+      {/* Повтор траты: форма открывается заполненной, но с сегодняшней датой */}
+      {modal?.type === 'repeatExpense' && (
+        <AddExpenseModal
+          categories={categories}
+          preselectedCategoryId={modal.expense.category_id}
+          prefill={{
+            amount: modal.expense.amount,
+            note: modal.expense.note,
+            subcategoryId: modal.expense.subcategory_id,
+            subitemId: modal.expense.subitem_id,
+          }}
+          onClose={() => setModal(null)}
+          onSubmit={handleAddExpense}
+        />
+      )}
+
       {modal?.type === 'deposit' && (
         <AddDepositModal
           depositCategories={depositCategories}
+          onClose={() => setModal(null)}
+          onSubmit={handleAddDeposit}
+          onAddCategory={handleAddDepositCategory}
+        />
+      )}
+
+      {/* Повтор внесения: сумма и категория из строки, дата сегодняшняя */}
+      {modal?.type === 'repeatDeposit' && (
+        <AddDepositModal
+          depositCategories={depositCategories}
+          prefill={{ amount: modal.deposit.amount, categoryId: modal.deposit.category_id }}
           onClose={() => setModal(null)}
           onSubmit={handleAddDeposit}
           onAddCategory={handleAddDepositCategory}
@@ -796,6 +1134,27 @@ const handleOpenReleases = async () => {
         />
       )}
 
+      {modal?.type === 'recurring' && (
+        <RecurringModal
+          categories={categories}
+          items={recurring}
+          monthlyTotal={recurringMonthly}
+          onClose={() => setModal(null)}
+          onAdd={handleAddRecurring}
+          onUpdate={handleUpdateRecurring}
+          onDelete={(id) => {
+            const item = recurring.find((r) => r.id === id);
+            setModal(null);
+            setConfirmDelete({
+              kind: 'recurring',
+              id,
+              title: item?.title,
+            });
+          }}
+          onPay={handlePayRecurring}
+        />
+      )}
+
       {modal?.type === 'update' && (
         <UpdateModal
           status={updateStatus}
@@ -819,6 +1178,9 @@ const handleOpenReleases = async () => {
               ? buildDeleteMessage('category', confirmDelete.impact)
               : confirmDelete.kind === 'subcategory'
               ? buildDeleteMessage('subcategory', confirmDelete.impact)
+              : confirmDelete.kind === 'recurring'
+              ? `Удалить регулярный платёж «${confirmDelete.title ?? ''}»? ` +
+                'Траты, которые он уже создал, останутся в истории.'
               : buildDeleteMessage('subitem', confirmDelete.impact)
           }
           confirmText="Удалить"

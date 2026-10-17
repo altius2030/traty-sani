@@ -27,6 +27,16 @@ interface AddExpenseModalProps {
   preselectedSubcategoryId?: number | null;
   /** Статья третьего уровня, выбранная в боковой панели */
   preselectedSubitemId?: number | null;
+  /**
+   * Данные для кнопки «Повторить»: форма открывается уже заполненной.
+   * Дата при этом всегда сегодняшняя — повторяют расход, а не старый чек.
+   */
+  prefill?: {
+    amount?: number | null;
+    note?: string | null;
+    subcategoryId?: number | null;
+    subitemId?: number | null;
+  };
   onClose: () => void;
   onSubmit: (data: {
     categoryId: number;
@@ -43,6 +53,7 @@ export default function AddExpenseModal({
   preselectedCategoryId,
   preselectedSubcategoryId,
   preselectedSubitemId,
+  prefill,
   onClose,
   onSubmit,
 }: AddExpenseModalProps) {
@@ -50,12 +61,16 @@ export default function AddExpenseModal({
     preselectedCategoryId ?? categories[0]?.id ?? 0
   );
   const [subcategoryId, setSubcategoryId] = useState<number | ''>(
-    preselectedSubcategoryId ?? ''
+    preselectedSubcategoryId ?? prefill?.subcategoryId ?? ''
   );
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(
+    prefill?.amount != null ? String(prefill.amount) : ''
+  );
   const [date, setDate] = useState(toISODate(new Date()));
-  const [note, setNote] = useState('');
-  const [subitemId, setSubitemId] = useState<number | ''>(preselectedSubitemId ?? '');
+  const [note, setNote] = useState(prefill?.note ?? '');
+  const [subitemId, setSubitemId] = useState<number | ''>(
+    preselectedSubitemId ?? prefill?.subitemId ?? ''
+  );
 
   // Сбрасываем подкатегорию только при реальной смене категории.
   // На первом рендере эффект тоже сработал бы и стёр бы подставленное
@@ -70,8 +85,15 @@ export default function AddExpenseModal({
     setSubitemId('');
   }, [categoryId]);
 
-  // Смена подкатегории сбрасывает статью — она принадлежит другой ветке
+  // Смена подкатегории сбрасывает статью — она принадлежит другой ветке.
+  // На первом рендере пропускаем: иначе стёрлась бы статья, подставленная
+  // кнопкой «Повторить».
+  const firstSubRender = useRef(true);
   useEffect(() => {
+    if (firstSubRender.current) {
+      firstSubRender.current = false;
+      return;
+    }
     setSubitemId('');
   }, [subcategoryId]);
 
@@ -239,6 +261,8 @@ interface AddDepositModalProps {
   onSubmit: (data: { amount: number; date: string; categoryId: number }) => void;
   /** Создание новой категории прямо из формы */
   onAddCategory: (name: string) => Promise<{ id: number; name: string }>;
+  /** Данные для кнопки «Повторить»; дата всегда сегодняшняя */
+  prefill?: { amount?: number | null; categoryId?: number | null };
 }
 
 /**
@@ -251,10 +275,13 @@ export function AddDepositModal({
   onClose,
   onSubmit,
   onAddCategory,
+  prefill,
 }: AddDepositModalProps) {
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(
+    prefill?.amount != null ? String(prefill.amount) : ''
+  );
   const [date, setDate] = useState(toISODate(new Date()));
-  const [categoryId, setCategoryId] = useState<number | ''>('');
+  const [categoryId, setCategoryId] = useState<number | ''>(prefill?.categoryId ?? '');
   const [categoryTouched, setCategoryTouched] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [creating, setCreating] = useState(false);

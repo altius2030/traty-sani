@@ -107,6 +107,35 @@ export const SCHEMA_SQL = `
     key TEXT PRIMARY KEY,
     value TEXT
   );
+
+  -- Регулярный платёж: аренда, подписка, связь, проездной и тому подобное.
+  --
+  -- Хранится именно next_date (дата следующего платежа), а не «день месяца».
+  -- Так расписание переживает пропущенные месяцы и не требует пересчёта при
+  -- каждом открытии программы: пока next_date в прошлом, платёж считается
+  -- просроченным, а отметка «оплачено» двигает дату вперёд на период.
+  --
+  -- Сдвиг даты делается в JS (см. advanceRecurringDate в main.ts): SQLite
+  -- не умеет прибавлять месяцы, а наивное прибавление через setMonth
+  -- переполняет месяц — 31 января превратился бы в 3 марта.
+  CREATE TABLE IF NOT EXISTS recurring (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    category_id INTEGER NOT NULL,
+    subcategory_id INTEGER,
+    subitem_id INTEGER,
+    amount REAL NOT NULL CHECK (amount > 0),
+    -- daily | weekly | monthly | quarterly | yearly
+    frequency TEXT NOT NULL,
+    next_date TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (category_id) REFERENCES categories(id),
+    FOREIGN KEY (subcategory_id) REFERENCES subcategories(id),
+    FOREIGN KEY (subitem_id) REFERENCES subitems(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_recurring_next ON recurring(is_active, next_date);
 `;
 
 export const DEFAULT_CATEGORIES: { name: string; type: string; sortOrder: number }[] = [

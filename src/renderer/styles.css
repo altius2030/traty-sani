@@ -244,6 +244,41 @@ input::placeholder {
   color: var(--text-muted);
 }
 
+/* Список горячих клавиш в меню «Файл» */
+.file-menu-shortcuts {
+  padding: 2px 10px 4px;
+}
+
+.file-menu-shortcuts-title {
+  padding-bottom: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.file-menu-shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.file-menu-shortcut kbd {
+  padding: 2px 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 5px;
+  background: var(--bg-hover);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
 /* Переключатель темы — в правой части шапки.
 
    На Windows там же находятся системные кнопки окна (свернуть, развернуть,
@@ -1870,6 +1905,369 @@ input::placeholder {
 .toast-message {
   flex: 1;
   font-size: 14px;
+}
+
+/* ——— Регулярные платежи ——— */
+
+.recurring-block {
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.recurring-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.recurring-block-head > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Счётчик просроченных платежей в заголовке блока */
+.recurring-overdue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent-danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.recurring-manage {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: var(--transition);
+}
+
+.recurring-manage:hover {
+  color: var(--accent-primary);
+  background: var(--bg-hover);
+}
+
+.recurring-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 4px 0;
+}
+
+.recurring-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.recurring-item-main {
+  min-width: 0;
+}
+
+.recurring-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recurring-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Просроченный платёж подсвечиваем — о нём и нужно напомнить */
+.recurring-item.overdue .recurring-item-meta {
+  color: var(--accent-danger);
+  font-weight: 600;
+}
+
+.recurring-item-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.recurring-item-amount {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.recurring-pay {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 6px;
+  background: var(--accent-primary);
+  color: #06231e;
+  font-size: 12px;
+  font-weight: 600;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.recurring-pay:hover {
+  opacity: 0.85;
+}
+
+.recurring-pay.compact {
+  padding: 4px 7px;
+}
+
+.recurring-total {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.recurring-total strong {
+  color: var(--text-primary);
+}
+
+.recurring-modal {
+  max-width: 720px;
+}
+
+.recurring-modal-body {
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+  max-height: 70vh;
+}
+
+.recurring-modal-empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.recurring-modal-total {
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.recurring-modal-total strong {
+  color: var(--accent-primary);
+  font-size: 16px;
+}
+
+.recurring-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.recurring-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+}
+
+.recurring-row.off {
+  opacity: 0.55;
+}
+
+.recurring-row-icon {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.recurring-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.recurring-row-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.recurring-off-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.recurring-row-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recurring-row-amount {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.recurring-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.recurring-form {
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+
+.recurring-form-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.recurring-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Панель фильтра над таблицей */
+.table-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-wrap: wrap;
+}
+
+.table-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-muted);
+}
+
+.table-search:focus-within {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(0, 212, 170, 0.15);
+}
+
+.table-search input {
+  flex: 1;
+  border: none;
+  background: none;
+  padding: 8px 0;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.table-search input:focus {
+  box-shadow: none;
+}
+
+.table-search-clear {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.table-search-clear:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.table-amount-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.table-amount-filter input {
+  width: 80px;
+  padding: 7px 9px;
+}
+
+.table-filter-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* Пара кнопок в строке: «Повторить» и удалить */
+.row-actions {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+/* Кнопка отмены удаления внутри тоста */
+.toast-action {
+  padding: 5px 12px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+  color: var(--accent-primary);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: var(--transition);
+}
+
+.toast-action:hover {
+  background: var(--accent-primary);
+  color: var(--bg-primary);
 }
 
 @media (max-width: 1024px) {

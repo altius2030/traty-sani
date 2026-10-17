@@ -449,6 +449,52 @@ ipcMain.handle('db:deleteExpense', (_, id: number) => {
   return { success: true };
 });
 
+/** Трата целиком — нужна для возврата удалённой записи */
+interface RestorableExpense {
+  id: number;
+  category_id: number;
+  subcategory_id: number | null;
+  subitem_id: number | null;
+  amount: number;
+  date: string;
+  note: string | null;
+  created_at: string;
+}
+
+/** Внесение целиком — нужно для возврата удалённой записи */
+interface RestorableDeposit {
+  id: number;
+  amount: number;
+  date: string;
+  category_id: number | null;
+  note: string | null;
+  created_at: string;
+}
+
+/**
+ * Возврат удалённой траты для отмены удаления.
+ *
+ * Запись вставляется с тем же id, что была до удаления, иначе в таблице
+ * появился бы дубль при следующем добавлении: AUTOINCREMENT продолжает
+ * счёт от максимального id, а не от того, который занимала удалённая строка.
+ */
+ipcMain.handle('db:restoreExpense', (_, expense: RestorableExpense) => {
+  db!.prepare(
+    `INSERT INTO expenses (id, category_id, subcategory_id, subitem_id, amount, date, note, created_at)
+     VALUES (@id, @category_id, @subcategory_id, @subitem_id, @amount, @date, @note, @created_at)`
+  ).run({
+    id: expense.id,
+    category_id: expense.category_id,
+    subcategory_id: expense.subcategory_id ?? null,
+    subitem_id: expense.subitem_id ?? null,
+    amount: expense.amount,
+    date: expense.date,
+    note: expense.note ?? null,
+    created_at: expense.created_at,
+  });
+  return { success: true };
+});
+
 /**
  * Производный остаток денег на указанную дату (включительно).
  *
@@ -632,6 +678,25 @@ ipcMain.handle('db:addDeposit', (_, deposit: { amount: number; date: string; cat
 
 ipcMain.handle('db:deleteDeposit', (_, id: number) => {
   db!.prepare('DELETE FROM deposits WHERE id = ?').run(id);
+  return { success: true };
+});
+
+/**
+ * Возврат удалённого внесения. Как и у траты, id сохраняется: иначе после
+ * отмены удаления в таблице появился бы дубль.
+ */
+ipcMain.handle('db:restoreDeposit', (_, deposit: RestorableDeposit) => {
+  db!.prepare(
+    `INSERT INTO deposits (id, amount, date, category_id, note, created_at)
+     VALUES (@id, @amount, @date, @category_id, @note, @created_at)`
+  ).run({
+    id: deposit.id,
+    amount: deposit.amount,
+    date: deposit.date,
+    category_id: deposit.category_id ?? null,
+    note: deposit.note ?? null,
+    created_at: deposit.created_at,
+  });
   return { success: true };
 });
 
@@ -900,6 +965,233 @@ ipcMain.handle('report:exportXlsx', async (_, payload: ReportXlsxPayload) => {
   const fs = await import('fs');
   fs.writeFileSync(filePath, buf);
   return { success: true, path: filePath };
+});
+
+// ——— Регулярные платежи ———
+
+type RecurringFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+
+/** Текущая дата в формате YYYY-MM-DD по местному времени */
+function todayISO(): string {
+  const now = new Date();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${m}-${d}`;
+}
+
+/**
+ * Разбирает YYYY-MM-DD в части без создания Date.
+ *
+ * new Date('2026-01-31') разбирается как UTC и в местном поясе может
+ * съехать на 30 января или 1 марта. Сравнение дат в SQL идёт как строки,
+ * поэтому здесь важно вернуть ровно те части, что были во входе.
+ */
+function parseISODate(iso: string): { y: number; m: number; d: number } {
+  const [y, m, d] = iso.split('-').map(Number);
+  return { y, m, d };
+}
+
+/** Количество дней в месяце; m — от 1 до 12 */
+function daysInMonth(y: number, m: number): number {
+  // День 0 следующего месяца — последний день текущего
+  return new Date(y, m, 0).getDate();
+}
+
+/**
+ * Прибавляет период к дате регулярного платежа.
+ *
+ * Для месяца, квартала и года день обрезается по длине целевого месяца:
+ * без этого аренда за 31 число из января уехала бы на 3 марта, потому что
+ * в феврале 31-го дня нет. Наивное прибавление через setMonth переполняет
+ * месяц именно так.
+ */
+function advanceRecurringDate(iso: string, frequency: RecurringFrequency): string {
+  const { y, m, d } = parseISODate(iso);
+
+  if (frequency === 'daily' || frequency === 'weekly') {
+    const days = frequency === 'daily' ? 1 : 7;
+    const dt = new Date(y, m - 1, d + days);
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    return `${dt.getFullYear()}-${mm}-${dd}`;
+  }
+
+  const step = frequency === 'monthly' ? 1 : frequency === 'quarterly' ? 3 : 12;
+  const totalMonths = (y * 12 + (m - 1)) + step;
+  const ny = Math.floor(totalMonths / 12);
+  const nm = (totalMonths % 12) + 1;
+  const nd = Math.min(d, daysInMonth(ny, nm));
+
+  const mm = String(nm).padStart(2, '0');
+  const dd = String(nd).padStart(2, '0');
+  return `${ny}-${mm}-${dd}`;
+}
+
+/**
+ * Двигает дату вперёд, пока она не окажется в будущем.
+ *
+ * Нужна для отставания: если платёж не отмечали три месяца, одна отметка
+ * «оплачено» должна погасить весь долг, а не оставлять два просроченных.
+ */
+function advanceUntilFuture(iso: string, frequency: RecurringFrequency, today: string): string {
+  let next = iso;
+  // Ограничение на итерации — подстраховка от бесконечного цикла
+  for (let i = 0; i < 1000 && next <= today; i++) {
+    next = advanceRecurringDate(next, frequency);
+  }
+  return next;
+}
+
+const RECURRING_SELECT = `
+  SELECT r.*, c.name AS category_name, c.icon AS category_icon, c.color AS category_color,
+         s.name AS subcategory_name
+  FROM recurring r
+  JOIN categories c ON r.category_id = c.id
+  LEFT JOIN subcategories s ON r.subcategory_id = s.id
+`;
+
+/** Активные платежи, срок которых наступил или прошёл */
+ipcMain.handle('db:getDueRecurring', () => {
+  const today = todayISO();
+  return db!.prepare(
+    `${RECURRING_SELECT} WHERE r.is_active = 1 AND r.next_date <= ? ORDER BY r.next_date, r.title`
+  ).all(today);
+});
+
+/** Все платёжи, включая выключенные — для экрана настройки */
+ipcMain.handle('db:getRecurring', () => {
+  return db!.prepare(`${RECURRING_SELECT} ORDER BY r.is_active DESC, r.next_date`).all();
+});
+
+ipcMain.handle('db:addRecurring', (_, p: {
+  title: string;
+  categoryId: number;
+  subcategoryId?: number;
+  subitemId?: number;
+  amount: number;
+  frequency: RecurringFrequency;
+  nextDate: string;
+}) => {
+  const info = db!.prepare(
+    `INSERT INTO recurring (title, category_id, subcategory_id, subitem_id, amount, frequency, next_date)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    p.title.trim(),
+    p.categoryId,
+    p.subcategoryId ?? null,
+    p.subitemId ?? null,
+    p.amount,
+    p.frequency,
+    p.nextDate
+  );
+  return { success: true, id: Number(info.lastInsertRowid) };
+});
+
+ipcMain.handle('db:updateRecurring', (_, id: number, patch: Partial<{
+  title: string;
+  amount: number;
+  frequency: RecurringFrequency;
+  nextDate: string;
+  isActive: boolean;
+}>) => {
+  const current = db!.prepare('SELECT * FROM recurring WHERE id = ?').get(id) as
+    | {
+        title: string;
+        amount: number;
+        frequency: RecurringFrequency;
+        next_date: string;
+        is_active: number;
+      }
+    | undefined;
+  if (!current) return { success: false, message: 'Платёж не найден' };
+
+  db!.prepare(
+    `UPDATE recurring SET title = ?, amount = ?, frequency = ?, next_date = ?, is_active = ?
+     WHERE id = ?`
+  ).run(
+    patch.title?.trim() ?? current.title,
+    patch.amount ?? current.amount,
+    patch.frequency ?? current.frequency,
+    patch.nextDate ?? current.next_date,
+    (patch.isActive === undefined ? current.is_active : patch.isActive ? 1 : 0),
+    id
+  );
+  return { success: true };
+});
+
+ipcMain.handle('db:deleteRecurring', (_, id: number) => {
+  db!.prepare('DELETE FROM recurring WHERE id = ?').run(id);
+  return { success: true };
+});
+
+/**
+ * Отметка «оплачено»: создаёт трату и сдвигает платёж на следующий период.
+ *
+ * Обе операции идут в одной транзакции. Иначе при сбое между ними получилось
+ * бы либо потерянное внесение, либо платёж, который никогда не спишется.
+ */
+ipcMain.handle('db:payRecurring', (_, id: number) => {
+  const today = todayISO();
+  const row = db!.prepare('SELECT * FROM recurring WHERE id = ?').get(id) as
+    | {
+        title: string;
+        category_id: number;
+        subcategory_id: number | null;
+        subitem_id: number | null;
+        amount: number;
+        frequency: RecurringFrequency;
+        next_date: string;
+      }
+    | undefined;
+
+  if (!row) return { success: false, message: 'Платёж не найден' };
+
+  // Тратой становится дата наступления, а не сегодня: если аренда была
+  // должна прийти 1-го, а отмечена 3-го, в статистике она должна лежать
+  // в том месяце, который оплачивали.
+  const expenseDate = row.next_date < today ? row.next_date : today;
+  const nextDate = advanceUntilFuture(row.next_date, row.frequency, today);
+
+  const pay = db!.transaction(() => {
+    db!.prepare(
+      `INSERT INTO expenses (category_id, subcategory_id, subitem_id, amount, date, note)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      row.category_id,
+      row.subcategory_id,
+      row.subitem_id,
+      row.amount,
+      expenseDate,
+      row.title
+    );
+    db!.prepare('UPDATE recurring SET next_date = ? WHERE id = ?').run(nextDate, id);
+  });
+  pay();
+
+  return { success: true, nextDate, expenseDate };
+});
+
+/**
+ * Сумма постоянных расходов в месяц.
+ *
+ * Дневные и недельные платежи пересчитываются в месяц, остальные берутся
+ * как есть. Это ориентир для планирования, а не точная сумма: платежи могут
+ * попадать на разные даты.
+ */
+ipcMain.handle('db:getRecurringMonthlyTotal', () => {
+  const rows = db!.prepare(
+    `SELECT amount, frequency FROM recurring WHERE is_active = 1`
+  ).all() as { amount: number; frequency: RecurringFrequency }[];
+
+  const perMonth: Record<RecurringFrequency, number> = {
+    daily: 30,
+    weekly: 4.345,
+    monthly: 1,
+    quarterly: 1 / 3,
+    yearly: 1 / 12,
+  };
+
+  return rows.reduce((sum, r) => sum + r.amount * perMonth[r.frequency], 0);
 });
 
 // ——— Обновление приложения ———

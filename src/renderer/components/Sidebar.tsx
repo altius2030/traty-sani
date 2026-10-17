@@ -8,7 +8,8 @@ import {
   Trash2,
   ChevronDown,
 } from 'lucide-react';
-import type { Category, Subcategory, Subitem } from '../types';
+import type { Category, Subcategory, Subitem, RecurringItem } from '../types';
+import { RecurringBlock } from './Recurring';
 import { formatMoney } from '../lib/format';
 import { getCategoryIcon as getCategoryIconDef } from '../lib/icons';
 
@@ -27,6 +28,12 @@ interface SidebarProps {
   onOpenCategoryManager: () => void;
   onDeleteCategory: (id: number) => void;
   onDeleteSubcategory: (id: number) => void;
+  /** Регулярные платежи, срок которых наступил */
+  recurring: RecurringItem[];
+  /** Сколько постоянных расходов выходит в месяц */
+  recurringMonthly: number;
+  onPayRecurring: (id: number) => void;
+  onOpenRecurringManager: () => void;
 }
 
 const WIDTH_KEY = 'traty-sidebar-width';
@@ -68,6 +75,10 @@ export default function Sidebar({
   onOpenCategoryManager,
   onDeleteCategory,
   onDeleteSubcategory,
+  recurring,
+  recurringMonthly,
+  onPayRecurring,
+  onOpenRecurringManager,
 }: SidebarProps) {
   // Раскрытая категория: плитка → выезжающий список её подкатегорий
   const [openId, setOpenId] = useState<number | null>(null);
@@ -318,6 +329,13 @@ export default function Sidebar({
           <Settings size={16} />
           Управление категориями
         </button>
+
+        <RecurringBlock
+          items={recurring}
+          monthlyTotal={recurringMonthly}
+          onPay={onPayRecurring}
+          onOpenManager={onOpenRecurringManager}
+        />
       </div>
 
       <div className="sidebar-section" style={{ marginTop: 'auto' }}>

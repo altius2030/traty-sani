@@ -1,4 +1,4 @@
-import { Trash2, CalendarDays, FileDown, Plus, Banknote, Receipt } from 'lucide-react';
+import { Trash2, CalendarDays, FileDown, Plus, Banknote, Receipt, Copy, Search, X } from 'lucide-react';
 import type { Deposit, Expense, Period, PeriodPreset } from '../types';
 import { formatMoney, getPeriodLabel, toISODate } from '../lib/format';
 import { getCategoryIcon as getCategoryIconDef } from '../lib/icons';
@@ -22,6 +22,16 @@ interface ExpenseTableProps {
   onAddExpense: () => void;
   onAddDeposit: () => void;
   onOpenReport: () => void;
+  /** Открыть форму траты, предзаполненной выбранной строкой */
+  onRepeatExpense: (expense: Expense) => void;
+  onRepeatDeposit: (deposit: Deposit) => void;
+  /** Фильтр по таблице: текст и диапазон сумм */
+  filter: { text: string; min: string; max: string };
+  onFilterChange: (filter: { text: string; min: string; max: string }) => void;
+  /** Поле поиска — на него наводит фокус горячая клавиша Ctrl+F */
+  searchRef: React.RefObject<HTMLInputElement>;
+  /** Сколько записей скрыто текущим фильтром */
+  hiddenCount: number;
 }
 
 const PRESETS: { key: PeriodPreset; label: string }[] = [
@@ -56,8 +66,15 @@ export default function ExpenseTable({
   onAddExpense,
   onAddDeposit,
   onOpenReport,
+  onRepeatExpense,
+  onRepeatDeposit,
+  filter,
+  onFilterChange,
+  searchRef,
+  hiddenCount,
 }: ExpenseTableProps) {
   const netChange = totalDeposits - totalExpenses;
+  const hasFilter = filter.text !== '' || filter.min !== '' || filter.max !== '';
 
   return (
     <section className="content-area">
@@ -159,20 +176,86 @@ export default function ExpenseTable({
       </div>
 
       <div className="table-container">
+        <div className="table-filter-bar">
+          <div className="table-search">
+            <Search size={15} />
+            <input
+              ref={searchRef}
+              type="text"
+              value={filter.text}
+              placeholder="Поиск: комментарий, категория, сумма"
+              onChange={(e) => onFilterChange({ ...filter, text: e.target.value })}
+              aria-label="Поиск по таблице"
+            />
+            {filter.text !== '' && (
+              <button
+                className="table-search-clear"
+                onClick={() => onFilterChange({ ...filter, text: '' })}
+                title="Очистить"
+                aria-label="Очистить поиск"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          <div className="table-amount-filter">
+            <span>сумма</span>
+            <input
+              type="number"
+              value={filter.min}
+              placeholder="от"
+              onChange={(e) => onFilterChange({ ...filter, min: e.target.value })}
+              aria-label="Сумма от"
+            />
+            <span>—</span>
+            <input
+              type="number"
+              value={filter.max}
+              placeholder="до"
+              onChange={(e) => onFilterChange({ ...filter, max: e.target.value })}
+              aria-label="Сумма до"
+            />
+          </div>
+
+          {hasFilter && (
+            <span className="table-filter-note">
+              Скрыто: {hiddenCount}
+            </span>
+          )}
+        </div>
+
         {loading ? (
           <div className="empty-state">
             <p>Загрузка...</p>
           </div>
         ) : activeTab === 'expenses' ? (
           expenses.length === 0 ? (
-            <div className="empty-state">
-              <CalendarDays size={64} className="empty-state-icon" />
-              <div className="empty-state-title">Нет трат за выбранный период</div>
-              <button className="btn btn-primary" onClick={onAddExpense}>
-                <Plus size={18} />
-                Добавить первую трату
-              </button>
-            </div>
+            hasFilter ? (
+              <div className="empty-state">
+                <Search size={64} className="empty-state-icon" />
+                <div className="empty-state-title">Ничего не найдено</div>
+                <div className="empty-state-text">
+                  Под фильтр не подошла ни одна трата за период
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  onClick={() => onFilterChange({ text: '', min: '', max: '' })}
+                >
+                  <X size={18} />
+                  Сбросить фильтр
+                </button>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <CalendarDays size={64} className="empty-state-icon" />
+                <div className="empty-state-title">Нет трат за выбранный период</div>
+                <button className="btn btn-primary" onClick={onAddExpense}>
+                  <Plus size={18} />
+                  Добавить первую трату
+                </button>
+              </div>
+            )
           ) : (
             <table className="data-table">
               <thead>
@@ -231,13 +314,22 @@ export default function ExpenseTable({
                         {expense.note || '—'}
                       </td>
                       <td>
-                        <button
-                          className="action-btn"
-                          onClick={() => onDeleteExpense(expense.id)}
-                          title="Удалить трату"
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <div className="row-actions">
+                          <button
+                            className="action-btn"
+                            onClick={() => onRepeatExpense(expense)}
+                            title="Повторить — откроет форму, заполненную этой тратой"
+                          >
+                            <Copy size={15} />
+                          </button>
+                          <button
+                            className="action-btn"
+                            onClick={() => onDeleteExpense(expense.id)}
+                            title="Удалить трату"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -265,14 +357,31 @@ export default function ExpenseTable({
             </table>
           )
         ) : deposits.length === 0 ? (
-          <div className="empty-state">
-            <Banknote size={64} className="empty-state-icon" />
-            <div className="empty-state-title">Нет внесений за выбранный период</div>
-            <button className="btn btn-deposit" onClick={onAddDeposit}>
-              <Banknote size={18} />
-              Внести деньги
-            </button>
-          </div>
+          hasFilter ? (
+            <div className="empty-state">
+              <Search size={64} className="empty-state-icon" />
+              <div className="empty-state-title">Ничего не найдено</div>
+              <div className="empty-state-text">
+                Под фильтр не подошло ни одно внесение за период
+              </div>
+              <button
+                className="btn btn-secondary"
+                onClick={() => onFilterChange({ text: '', min: '', max: '' })}
+              >
+                <X size={18} />
+                Сбросить фильтр
+              </button>
+            </div>
+          ) : (
+            <div className="empty-state">
+              <Banknote size={64} className="empty-state-icon" />
+              <div className="empty-state-title">Нет внесений за выбранный период</div>
+              <button className="btn btn-deposit" onClick={onAddDeposit}>
+                <Banknote size={18} />
+                Внести деньги
+              </button>
+            </div>
+          )
         ) : (
           <table className="data-table">
             <thead>
@@ -310,13 +419,22 @@ export default function ExpenseTable({
                     +{formatMoney(deposit.amount)}
                   </td>
                   <td>
-                    <button
-                      className="action-btn"
-                      onClick={() => onDeleteDeposit(deposit.id)}
-                      title="Удалить внесение"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="row-actions">
+                      <button
+                        className="action-btn"
+                        onClick={() => onRepeatDeposit(deposit)}
+                        title="Повторить — откроет форму с этой суммой и категорией"
+                      >
+                        <Copy size={15} />
+                      </button>
+                      <button
+                        className="action-btn"
+                        onClick={() => onDeleteDeposit(deposit.id)}
+                        title="Удалить внесение"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

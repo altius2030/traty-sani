@@ -26,6 +26,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addExpense: (expense: { categoryId: number; subcategoryId?: number; amount: number; date: string; note?: string }) => 
     ipcRenderer.invoke('db:addExpense', expense),
   deleteExpense: (id: number) => ipcRenderer.invoke('db:deleteExpense', id),
+  // Возврат удалённой записи для отмены удаления
+  restoreExpense: (expense: unknown) => ipcRenderer.invoke('db:restoreExpense', expense),
+  restoreDeposit: (deposit: unknown) => ipcRenderer.invoke('db:restoreDeposit', deposit),
+
+  // ——— Регулярные платежи ———
+  getDueRecurring: () => ipcRenderer.invoke('db:getDueRecurring'),
+  getRecurring: () => ipcRenderer.invoke('db:getRecurring'),
+  addRecurring: (p: unknown) => ipcRenderer.invoke('db:addRecurring', p),
+  updateRecurring: (id: number, patch: unknown) =>
+    ipcRenderer.invoke('db:updateRecurring', id, patch),
+  deleteRecurring: (id: number) => ipcRenderer.invoke('db:deleteRecurring', id),
+  payRecurring: (id: number) => ipcRenderer.invoke('db:payRecurring', id),
+  getRecurringMonthlyTotal: () => ipcRenderer.invoke('db:getRecurringMonthlyTotal'),
   
   getBalanceHistory: () => ipcRenderer.invoke('db:getBalanceHistory'),
   getCurrentBalance: () => ipcRenderer.invoke('db:getCurrentBalance'),
