@@ -708,6 +708,36 @@ const handlePayRecurring = async (id: number) => {
     return res;
   };
 
+  /**
+ * Оплата платежа, выбранного в календаре.
+ *
+ * Календарь отдаёт название и сумму, а не id: он строит сетку по датам и
+ * не знает про строки списка. Поэтому платёж ищется по названию среди
+ * действующих. Название здесь служит ключом — при совпадении двух
+ * платежей оплатится первый, что для регулярных услуг безобидно.
+ */
+const handlePayRecurringByTitle = async (title: string, amount: number) => {
+    const match = recurring.find((r) => r.title === title && Math.abs(r.amount - amount) < 0.01);
+    if (!match) {
+      addToast('Платёж не найден среди регулярных — обновите окно', 'error');
+      return;
+    }
+    await handlePayRecurring(match.id);
+  };
+
+  /**
+ * Загрузка месяца для календаря.
+ *
+ * Обязательно useCallback: функция передаётся в эффект окна как зависимость,
+ * и новая ссылка на каждый рендер запускала бы загрузку снова — бесконечный
+ * цикл «запросил → отрисовал → запросил».
+ */
+const loadRecurringCalendar = useCallback(
+    (startDate: string, endDate: string) =>
+      window.electronAPI.getRecurringCalendar({ startDate, endDate }),
+    []
+  );
+
   const handleOpenReport = () => {
     setModal({ type: 'report' });
   };
@@ -1152,6 +1182,8 @@ const handleOpenReleases = async () => {
             });
           }}
           onPay={handlePayRecurring}
+          onPayByTitle={handlePayRecurringByTitle}
+          loadCalendar={loadRecurringCalendar}
         />
       )}
 

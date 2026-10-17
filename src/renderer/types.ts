@@ -110,11 +110,20 @@ export interface RecurringItem {
   subcategory_name: string | null;
 }
 
-/** Человеческое название периода для платежа */
+/** Челонеское название периода для платежа */
 export function frequencyLabel(frequency: RecurringFrequency): string {
   return (
     RECURRING_FREQUENCIES.find((f) => f.value === frequency)?.label ?? 'Ежемесячно'
   );
+}
+
+/** Одно срабатывание платежа в календаре */
+export interface RecurringOccurrence {
+  date: string;
+  title: string;
+  amount: number;
+  category_name: string;
+  category_color: string | null;
 }
 
 export interface UpdateStatus {

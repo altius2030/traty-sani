@@ -4,6 +4,7 @@ import type {
   Deposit,
   RecurringItem,
   RecurringFrequency,
+  RecurringOccurrence,
 } from './types';
 
 export type UpdateState =
@@ -68,6 +69,15 @@ export interface ElectronAPI {
   // ——— Регулярные платежи ———
   getDueRecurring(): Promise<RecurringItem[]>;
   getRecurring(): Promise<RecurringItem[]>;
+  /**
+   * Даты платежей внутри месяца. Считается на сервере той же функцией
+   * сдвига, что и кнопка «оплачено», поэтому календарь и реальные траты
+   * не могут разойтись.
+   */
+  getRecurringCalendar(range: {
+    startDate: string;
+    endDate: string;
+  }): Promise<RecurringOccurrence[]>;
   addRecurring(p: {
     title: string;
     categoryId: number;

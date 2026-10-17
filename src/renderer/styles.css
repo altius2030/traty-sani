@@ -2173,6 +2173,190 @@ input::placeholder {
   margin-top: 12px;
 }
 
+/* Кнопка раскрытия формы — по умолчанию свёрнута */
+.recurring-add-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px;
+  margin-bottom: 14px;
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  transition: var(--transition);
+}
+
+.recurring-add-trigger:hover {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  background: var(--bg-hover);
+}
+
+/* Кнопки в заголовке окна */
+.recurring-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action-btn.active {
+  color: var(--accent-primary);
+  background: var(--bg-hover);
+}
+
+/* ——— Календарь платежей ——— */
+
+.recurring-calendar {
+  /* Уже окна: растянутая на всю ширину сетка раздавала ячейкам по ~90px
+     и календарь занимал пол-экрана, из-за чего список платежей уезжал
+     далеко вниз и до него приходилось прокручивать */
+  max-width: 470px;
+  margin: 0 auto;
+}
+
+.recurring-calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.recurring-calendar-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.recurring-calendar-total {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.recurring-calendar-weekdays,
+.recurring-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+
+.recurring-calendar-weekdays {
+  margin-bottom: 3px;
+}
+
+.recurring-calendar-weekdays > div {
+  padding: 4px 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.recurring-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  /* Не квадрат: aspect-ratio: 1 при ширине окна давал ячейкам ~90px по
+     высоте, и шесть недель календаря не влезали в экран вместе со
+     списком платежей */
+  min-height: 38px;
+  padding: 4px 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  transition: var(--transition);
+}
+
+.recurring-cell.empty {
+  background: none;
+}
+
+.recurring-cell.has:hover {
+  border-color: var(--accent-primary);
+}
+
+.recurring-cell.past {
+  color: var(--text-muted);
+}
+
+.recurring-cell.today {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  font-weight: 700;
+}
+
+.recurring-cell.selected {
+  background: var(--bg-hover);
+  border-color: var(--accent-secondary);
+  color: var(--text-primary);
+}
+
+.recurring-cell-day {
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Точки категорий под числом дня */
+.recurring-cell-dots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+}
+
+.recurring-cell-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+
+.recurring-cell-dots em {
+  font-size: 9px;
+  font-style: normal;
+  color: var(--text-muted);
+}
+
+.recurring-calendar-day {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.recurring-calendar-day-title {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: capitalize;
+  margin-bottom: 8px;
+}
+
+.recurring-calendar-day-empty {
+  font-size: 13px;
+  color: var(--text-muted);
+  padding: 6px 0;
+}
+
+.recurring-calendar-day-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border-color);
+}
+
 /* Панель фильтра над таблицей */
 .table-filter-bar {
   display: flex;

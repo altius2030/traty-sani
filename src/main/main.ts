@@ -971,6 +971,22 @@ ipcMain.handle('report:exportXlsx', async (_, payload: ReportXlsxPayload) => {
 
 type RecurringFrequency = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
 
+/** Строка регулярного платежа в том виде, в каком её отдаёт база */
+interface RecurringRow {
+  id: number;
+  title: string;
+  category_id: number;
+  subcategory_id: number | null;
+  subitem_id: number | null;
+  amount: number;
+  frequency: RecurringFrequency;
+  is_active: number;
+  category_name: string;
+  category_icon?: string | null;
+  category_color?: string | null;
+  subcategory_name: string | null;
+}
+
 /** Текущая дата в формате YYYY-MM-DD по местному времени */
 function todayISO(): string {
   const now = new Date();
@@ -1063,6 +1079,52 @@ ipcMain.handle('db:getRecurring', () => {
   return db!.prepare(`${RECURRING_SELECT} ORDER BY r.is_active DESC, r.next_date`).all();
 });
 
+/**
+ * Даты всех платежей, попадающих в указанный месяц.
+ *
+ * Считается на сервере той же функцией advanceRecurringDate, что двигает
+ * платёж по кнопке «оплачено». Это принципиально: если бы календарь считал
+ * даты по-своему, он мог бы показать 28-е, а трата потом создалась бы с
+ * другой датой — и визуально расходились бы два экрана об одном и том же.
+ *
+ * Ход начинается с next_date платежа, а не с начала месяца: так учитываются
+ * просроченные и уже сдвинутые расписания.
+ */
+ipcMain.handle(
+  'db:getRecurringCalendar',
+  (_, range: { startDate: string; endDate: string }) => {
+    const rows = db!.prepare(
+      `${RECURRING_SELECT} WHERE r.is_active = 1`
+    ).all() as (RecurringRow & { next_date: string; frequency: RecurringFrequency })[];
+
+    const result: { date: string; title: string; amount: number; category_name: string; category_color: string | null }[] = [];
+
+    for (const row of rows) {
+      // Потолок нужен на случай, если платёж отстал на годы: ежедневный
+      // за десять лет дал бы больше трёх с половиной тысяч шагов
+      let cursor = row.next_date;
+      for (let i = 0; i < 2000; i++) {
+        if (cursor > range.endDate) break;
+        if (cursor >= range.startDate) {
+          result.push({
+            date: cursor,
+            title: row.title,
+            amount: row.amount,
+            category_name: row.category_name,
+            category_color: row.category_color ?? null,
+          });
+        }
+        const next = advanceRecurringDate(cursor, row.frequency);
+        // Защита от зацикливания на некорректном периоде
+        if (next <= cursor) break;
+        cursor = next;
+      }
+    }
+
+    return result.sort((a, b) => (a.date === b.date ? a.title.localeCompare(b.title) : a.date.localeCompare(b.date)));
+  }
+);
+
 ipcMain.handle('db:addRecurring', (_, p: {
   title: string;
   categoryId: number;
@@ -1133,15 +1195,7 @@ ipcMain.handle('db:deleteRecurring', (_, id: number) => {
 ipcMain.handle('db:payRecurring', (_, id: number) => {
   const today = todayISO();
   const row = db!.prepare('SELECT * FROM recurring WHERE id = ?').get(id) as
-    | {
-        title: string;
-        category_id: number;
-        subcategory_id: number | null;
-        subitem_id: number | null;
-        amount: number;
-        frequency: RecurringFrequency;
-        next_date: string;
-      }
+    | (RecurringRow & { next_date: string })
     | undefined;
 
   if (!row) return { success: false, message: 'Платёж не найден' };

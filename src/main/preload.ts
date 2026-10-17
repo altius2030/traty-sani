@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ——— Регулярные платежи ———
   getDueRecurring: () => ipcRenderer.invoke('db:getDueRecurring'),
   getRecurring: () => ipcRenderer.invoke('db:getRecurring'),
+  getRecurringCalendar: (range: unknown) => ipcRenderer.invoke('db:getRecurringCalendar', range),
   addRecurring: (p: unknown) => ipcRenderer.invoke('db:addRecurring', p),
   updateRecurring: (id: number, patch: unknown) =>
     ipcRenderer.invoke('db:updateRecurring', id, patch),
