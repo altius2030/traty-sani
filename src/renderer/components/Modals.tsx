@@ -244,29 +244,30 @@ export default function AddExpenseModal({
                 required
               />
             </div>
+          </div>
 
-            {/* Счёт показываем, только когда их больше одного: при единственном
-                выбирать не из чего, а лишнее поле в форме только мешает. */}
-            {accounts.length > 1 && (
-              <div className="form-group">
-                <label className="form-label" htmlFor="expense-account">
-                  Счёт
-                </label>
-                <select
-                  id="expense-account"
-                  value={accountId}
-                  onChange={(e) =>
-                    setAccountId(e.target.value === '' ? '' : Number(e.target.value))
-                  }
-                >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} — {formatMoney(a.balance)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+          {/* Счёт вынесен в отдельную строку: в одной строке с суммой и датой
+              он обрезался краем окна, а в названии счёта ещё остаток, который
+              туда не помещался. */}
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="expense-account">
+                Счёт
+              </label>
+              <select
+                id="expense-account"
+                value={accountId}
+                onChange={(e) =>
+                  setAccountId(e.target.value === '' ? '' : Number(e.target.value))
+                }
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} — {formatMoney(a.balance)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="form-group">
@@ -414,27 +415,27 @@ export function AddDepositModal({
                 required
               />
             </div>
+          </div>
 
-            {accounts.length > 1 && (
-              <div className="form-group">
-                <label className="form-label" htmlFor="deposit-account">
-                  Счёт
-                </label>
-                <select
-                  id="deposit-account"
-                  value={accountId}
-                  onChange={(e) =>
-                    setAccountId(e.target.value === '' ? '' : Number(e.target.value))
-                  }
-                >
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} — {formatMoney(a.balance)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="deposit-account">
+                Счёт
+              </label>
+              <select
+                id="deposit-account"
+                value={accountId}
+                onChange={(e) =>
+                  setAccountId(e.target.value === '' ? '' : Number(e.target.value))
+                }
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} — {formatMoney(a.balance)}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div className="form-group">
@@ -592,8 +593,7 @@ export function AddBalanceModal({ onClose, onSubmit, accounts = [], preselectedA
             />
           </div>
 
-          {accounts.length > 1 && (
-            <div className="form-group">
+          <div className="form-group">
               <label className="form-label" htmlFor="balance-account">
                 Счёт
               </label>
@@ -615,7 +615,6 @@ export function AddBalanceModal({ onClose, onSubmit, accounts = [], preselectedA
                 сделайте это на каждом отдельно.
               </div>
             </div>
-          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="balance-note">
