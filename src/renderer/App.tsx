@@ -39,10 +39,17 @@ import {
   parseCategoriesSubcategories,
 } from './lib/format';
 
-/** Текст подтверждения удаления: прямо говорим, сколько трат пропадёт */
+/**
+ * Подтверждение удаления справочника.
+ *
+ * С 1.0.22 удаление не трогает траты: из справочника исчезает только сам
+ * список, а уже проведённые операции остаются в базе под ключом
+ * «Без категории». Поэтому здесь важно не написать «будут удалены N трат» —
+ * это было бы неправдой, и человек удалил бы категорию, побоявшись за историю.
+ */
 function buildDeleteMessage(
   kind: 'category' | 'subcategory' | 'subitem',
-  impact?: { expenses: number; subcategories: number; subitems?: number }
+  impact?: { expenses: number; subcategories: number; subitems?: number; recurring?: number }
 ): string {
   const noun =
     kind === 'category'
@@ -50,22 +57,24 @@ function buildDeleteMessage(
       : kind === 'subcategory'
       ? 'эту подкатегорию'
       : 'эту статью';
-  const parts: string[] = [];
-
+  const dictParts: string[] = [];
   if (impact && impact.subcategories > 0) {
-    parts.push(`${impact.subcategories} подкатегорий`);
+    dictParts.push(`${impact.subcategories} подкатегорий`);
   }
   if (impact && impact.subitems && impact.subitems > 0) {
-    parts.push(`${impact.subitems} статей`);
+    dictParts.push(`${impact.subitems} статей`);
   }
-  if (impact && impact.expenses > 0) {
-    parts.push(`${impact.expenses} трат`);
+  if (impact && impact.recurring && impact.recurring > 0) {
+    dictParts.push(`${impact.recurring} регулярных платежей`);
   }
 
-  if (parts.length === 0) {
-    return `Вы уверены, что хотите удалить ${noun}?`;
-  }
-  return `Удалить ${noun}? Вместе с ней будут удалены: ${parts.join(' и ')}. Отменить это действие нельзя.`;
+  const dict = dictParts.length > 0 ? ` ${dictParts.join(' и ')}` : '';
+  const trades =
+    impact && impact.expenses > 0
+      ? ` Траты останутся в базе (${impact.expenses} шт.) и покажутся как «Без категории».`
+      : '';
+
+  return `Удалить ${noun}? Из справочника исчезнет${dict}.${trades} Отменить это действие нельзя.`;
 }
 
 /**
@@ -203,7 +212,12 @@ function App() {
           | 'loan'
           | 'income';
         id: number;
-        impact?: { expenses: number; subcategories: number; subitems?: number };
+        impact?: {
+    expenses: number;
+    subcategories: number;
+    subitems?: number;
+    recurring?: number;
+  };
         /** Сколько внесений исчезнет вместе с категорией внесений */
         depositsCount?: number;
         /** Название категории внесений — для понятного вопроса */
@@ -492,16 +506,25 @@ useEffect(() => {
     date: string;
     note?: string;
   }) => {
-    await window.electronAPI.addExpense(data);
+    const saved = await window.electronAPI.addExpense(data);
     setModal(null);
-    addToast(`Трата ${formatMoney(data.amount)} добавлена`);
+    // Предупреждение заменяет обычное подтверждение: запись создана, но в
+    // остаток не попала. Два тоста подряд читались бы как «сохранилось» и
+    // «ошибка» одновременно.
+    addToast(
+      saved?.warning
+        ? `Трата ${formatMoney(data.amount)} добавлена, но в остаток не вошла. ${saved.warning}`
+        : `Трата ${formatMoney(data.amount)} добавлена`,
+      saved?.warning ? 'error' : 'success',
+      saved?.warning ? { duration: 12000 } : undefined
+    );
     await Promise.all([loadExpenses(period), loadBalances()]);
   };
 
   const handleAddBalance = async (data: { amount: number; date: string; note?: string }) => {
     await window.electronAPI.addBalance(data);
     setModal(null);
-    addToast(`Остаток ${formatMoney(data.amount)} сохранён`);
+    addToast(`Остаток ${formatMoney(data.amount)} сохранён на ${data.date}`);
     await loadBalances();
   };
 
@@ -510,7 +533,13 @@ useEffect(() => {
       const saved = await window.electronAPI.addDeposit(data);
       setModal(null);
       const label = saved?.category_name ? ` — ${saved.category_name}` : '';
-      addToast(`Внесено ${formatMoney(data.amount)}${label}`);
+      addToast(
+        saved?.warning
+          ? `Внесено ${formatMoney(data.amount)}${label}, но в остаток не вошло. ${saved.warning}`
+          : `Внесено ${formatMoney(data.amount)}${label}`,
+        saved?.warning ? 'error' : 'success',
+        saved?.warning ? { duration: 12000 } : undefined
+      );
       await Promise.all([loadExpenses(period), loadBalances()]);
     } catch (err) {
       const message =
@@ -569,6 +598,23 @@ useEffect(() => {
   const handleRenameDepositCategory = makeRenameHandler((id, name) =>
     window.electronAPI.renameDepositCategory(id, name)
   );
+
+  /** Объединение категорий: основная остаётся, остальные переезжают в неё */
+  const handleMergeCategories = async (targetId: number, sourceIds: number[]) => {
+    const res = await window.electronAPI.mergeCategories({ targetId, sourceIds });
+    await Promise.all([loadCategories(), loadExpenses(period), loadRecurring()]);
+    const parts: string[] = [];
+    if (res.movedSubcategories > 0) parts.push(`${res.movedSubcategories} подк.`);
+    if (res.mergedSubcategories > 0) parts.push(`${res.mergedSubcategories} слито`);
+    if (res.movedExpenses > 0) parts.push(`${res.movedExpenses} трат`);
+    if (res.movedRecurring > 0) parts.push(`${res.movedRecurring} платежей`);
+    addToast(
+      parts.length > 0
+        ? `Объединено в «${res.targetName}»: ${parts.join(', ')}`
+        : `Объединено в «${res.targetName}»`,
+      'success'
+    );
+  };
 
   const handleDeleteExpense = (id: number) => {
     setConfirmDelete({ kind: 'expense', id });
@@ -1012,7 +1058,7 @@ const loadRecurringCalendar = useCallback(
     lines.push('Детальный список трат:');
     lines.push('Дата;Категория;Подкатегория;Статья;Сумма;Комментарий');
     for (const exp of rep.expenses) {
-      const cat = exp.category_name.replace(/;/g, ',');
+      const cat = (exp.category_name || 'Без категории').replace(/;/g, ',');
       const sub = (exp.subcategory_name || '').replace(/;/g, ',');
       const item = (exp.subitem_name || '').replace(/;/g, ',');
       const note = (exp.note || '').replace(/;/g, ',');
@@ -1392,6 +1438,7 @@ const handleOpenReleases = async () => {
           onRenameSubcategory={handleRenameSubcategory}
           onRenameSubitem={handleRenameSubitem}
           onRenameDepositCategory={handleRenameDepositCategory}
+          onMergeCategories={handleMergeCategories}
           onSetDepositColor={handleSetDepositColor}
         />
       )}

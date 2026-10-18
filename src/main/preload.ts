@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteSubitem: (id: number) => ipcRenderer.invoke('db:deleteSubitem', id),
   deleteCategory: (id: number) => ipcRenderer.invoke('db:deleteCategory', id),
   deleteSubcategory: (id: number) => ipcRenderer.invoke('db:deleteSubcategory', id),
+  mergeCategories: (payload: { targetId: number; sourceIds: number[] }) =>
+    ipcRenderer.invoke('db:mergeCategories', payload),
   renameCategory: (id: number, name: string) => ipcRenderer.invoke('db:renameCategory', id, name),
   renameSubcategory: (id: number, name: string) => ipcRenderer.invoke('db:renameSubcategory', id, name),
   renameSubitem: (id: number, name: string) => ipcRenderer.invoke('db:renameSubitem', id, name),

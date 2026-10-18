@@ -41,13 +41,17 @@ export const SCHEMA_SQL = `
 
   CREATE TABLE IF NOT EXISTS expenses (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    category_id INTEGER NOT NULL,
+    -- Nullable начиная с 1.0.22: удаление категории больше не удаляет траты,
+    -- а оставляет их в базе без категории. Такие траты видны в таблице и
+    -- отчёте под ключом «Без категории» и по-прежнему влияют на остаток.
+    category_id INTEGER,
     subcategory_id INTEGER,
     amount REAL NOT NULL,
     date TEXT NOT NULL,
     note TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     subitem_id INTEGER,
+    loan_id INTEGER,
     FOREIGN KEY (category_id) REFERENCES categories(id),
     FOREIGN KEY (subcategory_id) REFERENCES subcategories(id),
     FOREIGN KEY (subitem_id) REFERENCES subitems(id)
@@ -251,6 +255,66 @@ export interface DepositNoteMigrationResult {
 }
 
 /**
+ * Снимает NOT NULL с expenses.category_id.
+ *
+ * С 1.0.22 удаление категории не удаляет траты: они остаются в базе без
+ * категории и показываются под ключом «Без категории». Пока колонка NOT NULL,
+ * обнулить ссылку нельзя — а именно это и нужно сделать при удалении.
+ *
+ * Таблицу приходится пересоздавать: SQLite не умеет снимать ограничения через
+ * ALTER. Как и в migrateDepositNotesToCategories, миграция определяется по
+ * самой схеме, а не по флажку в settings, поэтому повторный запуск безопасен.
+ * id переносятся явно — иначе история перемешалась бы, а AUTOINCREMENT
+ * продолжил бы счёт не с того места.
+ */
+export function migrateExpensesNullableCategory(database: Database): boolean {
+  const cols = database.prepare('PRAGMA table_info(expenses)').all() as {
+    name: string;
+    notnull: number;
+  }[];
+  const categoryCol = cols.find((c) => c.name === 'category_id');
+  if (!categoryCol || categoryCol.notnull !== 1) return false;
+
+  const hasLoan = cols.some((c) => c.name === 'loan_id');
+
+  const migrate = database.transaction(() => {
+    database.exec(`
+      CREATE TABLE expenses_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category_id INTEGER,
+        subcategory_id INTEGER,
+        amount REAL NOT NULL,
+        date TEXT NOT NULL,
+        note TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        subitem_id INTEGER,
+        loan_id INTEGER,
+        FOREIGN KEY (category_id) REFERENCES categories(id),
+        FOREIGN KEY (subcategory_id) REFERENCES subcategories(id),
+        FOREIGN KEY (subitem_id) REFERENCES subitems(id)
+      )
+    `);
+    database.exec(`
+      INSERT INTO expenses_new
+        (id, category_id, subcategory_id, subitem_id, amount, date, note, created_at, loan_id)
+      SELECT id, category_id, subcategory_id, subitem_id, amount, date, note, created_at,
+             ${hasLoan ? 'loan_id' : 'NULL'}
+      FROM expenses
+    `);
+    database.exec(`DROP TABLE expenses`);
+    database.exec(`ALTER TABLE expenses_new RENAME TO expenses`);
+    database.exec(`
+      CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date);
+      CREATE INDEX IF NOT EXISTS idx_loans_link_expense ON expenses(loan_id);
+    `);
+  });
+  migrate();
+
+  console.log('[schema] expenses.category_id больше не NOT NULL: траты переживают удаление категории');
+  return true;
+}
+
+/**
  * Превращает комментарий внесения в категорию справочника.
  *
  * Одинаковые комментарии объединяются: сравнение идёт без учёта регистра и
@@ -369,6 +433,10 @@ export function migrateDepositNotesToCategories(
  */
 export function applySchema(database: Database): void {
   database.exec(SCHEMA_SQL);
+
+  // Пересоздаёт expenses, поэтому идёт сразу: всё, что дальше работает с этой
+  // таблицей, уже видит nullable category_id.
+  migrateExpensesNullableCategory(database);
 
   // Миграция: уникальность подкатегорий внутри категории.
   // Без этого повторные запуски дублируют дефолтные подкатегории,

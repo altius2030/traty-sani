@@ -403,7 +403,9 @@ ipcMain.handle('db:addSubitem', (_, subcategoryId: number, name: string) => {
 
 ipcMain.handle('db:deleteSubitem', (_, id: number) => {
   const run = db!.transaction((itemId: number) => {
-    db!.prepare('DELETE FROM expenses WHERE subitem_id = ?').run(itemId);
+    // Статья — только метка: снимаем ссылку, трату не трогаем
+    db!.prepare('UPDATE expenses SET subitem_id = NULL WHERE subitem_id = ?').run(itemId);
+    db!.prepare('UPDATE recurring SET subitem_id = NULL WHERE subitem_id = ?').run(itemId);
     db!.prepare('DELETE FROM subitems WHERE id = ?').run(itemId);
   });
   run(id);
@@ -451,13 +453,23 @@ ipcMain.handle(
         `SELECT COUNT(*) c FROM subitems
          WHERE subcategory_id IN (SELECT id FROM subcategories WHERE category_id = ?)`
       ).get(id) as { c: number };
-      return { expenses: expenses.c, subcategories: subs.c, subitems: items.c };
+      // Регулярные платежи этой категории удалятся вместе с ней: поле
+      // category_id у них NOT NULL, и подставить вместо него нечего.
+      const recurring = db!.prepare(
+        'SELECT COUNT(*) c FROM recurring WHERE category_id = ?'
+      ).get(id) as { c: number };
+      return {
+        expenses: expenses.c,
+        subcategories: subs.c,
+        subitems: items.c,
+        recurring: recurring.c,
+      };
     }
     if (kind === 'subitem') {
       const expenses = db!.prepare('SELECT COUNT(*) c FROM expenses WHERE subitem_id = ?').get(id) as {
         c: number;
       };
-      return { expenses: expenses.c, subcategories: 0, subitems: 0 };
+      return { expenses: expenses.c, subcategories: 0, subitems: 0, recurring: 0 };
     }
     const expenses = db!.prepare(
       `SELECT COUNT(*) c FROM expenses
@@ -467,22 +479,135 @@ ipcMain.handle(
     const items = db!.prepare('SELECT COUNT(*) c FROM subitems WHERE subcategory_id = ?').get(id) as {
       c: number;
     };
-    return { expenses: expenses.c, subcategories: 0, subitems: items.c };
+    return { expenses: expenses.c, subcategories: 0, subitems: items.c, recurring: 0 };
   }
 );
 
 /**
+ * Объединение нескольких категорий в одну.
+ *
+ * Выбранная основная категория сохраняется, остальные исчезают из справочника.
+ * Переносим всё содержимое: подкатегории со статьями, траты и регулярные
+ * платежи. Траты, у которых подкатегории не было, просто меняют category_id
+ * и остаются на верхнем уровне основной категории.
+ *
+ * Имена подкатегорий могут совпасть — тогда они сливаются в одну, а траты с
+ * обеих сторон начинают разделяться по ней. Удалять дубли нельзя: на одном из
+ * них может висеть статья, а потеря статьи — это потеря детализации.
+ */
+ipcMain.handle('db:mergeCategories', (_, payload: { targetId: number; sourceIds: number[] }) => {
+  const targetId = Number(payload.targetId);
+  const sourceIds = (payload.sourceIds || []).map(Number).filter((id) => id > 0 && id !== targetId);
+  if (!Number.isFinite(targetId) || targetId <= 0) throw new Error('Не выбрана основная категория');
+  if (sourceIds.length === 0) throw new Error('Не выбрано, что объединять');
+
+  const target = db!.prepare('SELECT name, is_custom FROM categories WHERE id = ?').get(targetId) as
+    | { name: string; is_custom: number }
+    | undefined;
+  if (!target) throw new Error('Основная категория не найдена');
+
+  const stats = { movedSubcategories: 0, mergedSubcategories: 0, movedExpenses: 0, movedRecurring: 0 };
+
+  const run = db!.transaction(() => {
+    for (const srcId of sourceIds) {
+      const src = db!.prepare('SELECT name, is_custom FROM categories WHERE id = ?').get(srcId) as
+        | { name: string; is_custom: number }
+        | undefined;
+      if (!src) continue;
+
+      // 1. Подкатегории: переносим в основную, при совпадении имён сливаем.
+      const subs = db!
+        .prepare('SELECT id, name FROM subcategories WHERE category_id = ?')
+        .all(srcId) as { id: number; name: string }[];
+      for (const sub of subs) {
+        const clash = db!
+          .prepare(
+            `SELECT id FROM subcategories
+             WHERE category_id = ? AND name = ? AND id <> ?`
+          )
+          .get(targetId, sub.name, sub.id) as { id: number } | undefined;
+        if (clash) {
+          // Статьи переносятся в существующую подкатегорию с тем же именем
+          db!.prepare('UPDATE subitems SET subcategory_id = ? WHERE subcategory_id = ?').run(
+            clash.id,
+            sub.id
+          );
+          db!.prepare('UPDATE expenses SET subcategory_id = ? WHERE subcategory_id = ?').run(
+            clash.id,
+            sub.id
+          );
+          db!.prepare('DELETE FROM subcategories WHERE id = ?').run(sub.id);
+          stats.mergedSubcategories++;
+        } else {
+          db!.prepare('UPDATE subcategories SET category_id = ? WHERE id = ?').run(targetId, sub.id);
+          stats.movedSubcategories++;
+        }
+      }
+
+      // 2. Траты: переносим ВСЕ, а не только те, у которых подкатегории нет.
+      //    Раньше здесь стояло `AND subcategory_id IS NULL`, и траты с
+      //    подкатегорией оставались со старой категорией — удаление исчезающей
+      //    категории падало на внешнем ключе. Подкатегория к этому моменту уже
+      //    переехала в основную, поэтому трата меняет верхний уровень, а
+      //    детализация сохраняется.
+      const moved = db!.prepare('UPDATE expenses SET category_id = ? WHERE category_id = ?').run(
+        targetId,
+        srcId
+      );
+      stats.movedExpenses += moved.changes;
+
+      // 3. Регулярные платежи: переносим целиком — иначе удаление категории
+      //    тоже упёрлось бы во внешний ключ.
+      const rec = db!.prepare('UPDATE recurring SET category_id = ? WHERE category_id = ?').run(
+        targetId,
+        srcId
+      );
+      stats.movedRecurring += rec.changes;
+
+      // Ссылка на подкатегорию могла остаться на слитой (уже удалённой).
+      // Подчищаем: осиротевшая ссылка скрыла бы трату из списков, но
+      // продолжала бы влиять на остаток.
+      db!.prepare(
+        `UPDATE expenses SET subcategory_id = NULL, subitem_id = NULL
+         WHERE subcategory_id IS NOT NULL
+           AND subcategory_id NOT IN (SELECT id FROM subcategories)`
+      ).run();
+
+      // 4. Встроенную исчезающую категорию запоминаем, иначе applySchema()
+      //    вернёт её при следующем запуске.
+      if (src.is_custom === 0) {
+        db!.prepare(
+          `INSERT OR REPLACE INTO settings (key, value) VALUES (?, datetime('now'))`
+        ).run(`deleted_default:${src.name}`);
+      }
+      db!.prepare('DELETE FROM categories WHERE id = ?').run(srcId);
+    }
+  });
+  run();
+
+  // Синхронизируем настройки переименованных встроенных подкатегорий: после
+  // переноса ключ deleted_sub ссылается на старую категорию и перестаёт
+  // защищать подкатегорию от возврата.
+  return { success: true, ...stats, targetName: target.name };
+});
+
+/**
  * Удаление категории. Разрешено и для встроенных («Закуп», «Такси») —
  * ограничения на is_custom больше нет.
- * Траты этой категории удаляются вместе с ней: оставить их было бы хуже,
- * т.к. в списках они выбираются INNER JOIN'ом по категории и просто исчезли бы
- * из интерфейса вместе с суммами в отчёте.
+ *
+ * С 1.0.22 траты НЕ удаляются: у них просто снимается ссылка на категорию,
+ * и они остаются в базе под ключом «Без категории». Раньше здесь стояло
+ * каскадное удаление, но оно молча уносило историю трат — а потерять историю
+ * из-за того, что переименовываешь или убираешь ненужную категорию, нельзя.
+ * Подкатегории и статьи как справочник удаляются: иначе они осиротеют.
  */
 ipcMain.handle('db:deleteCategory', (_, id: number) => {
   const row = db!.prepare('SELECT name, is_custom FROM categories WHERE id = ?').get(id) as
     | { name: string; is_custom: number }
     | undefined;
+  if (!row) throw new Error('Категория не найдена');
 
+  let deletedRecurring = 0;
   const run = db!.transaction((categoryId: number, name: string, isCustom: number) => {
     // Встроенную категорию запоминаем как удалённую, иначе applySchema()
     // создаст её заново при следующем запуске.
@@ -491,20 +616,48 @@ ipcMain.handle('db:deleteCategory', (_, id: number) => {
         `INSERT OR REPLACE INTO settings (key, value) VALUES (?, datetime('now'))`
       ).run(`deleted_default:${name}`);
     }
-    db!.prepare('DELETE FROM expenses WHERE category_id = ?').run(categoryId);
+    // Траты сохраняем: снимаем все три ссылки, они указывали на справочник,
+    // который сейчас исчезнет.
+    db!.prepare('UPDATE expenses SET category_id = NULL WHERE category_id = ?').run(categoryId);
     db!.prepare(
-      `DELETE FROM expenses WHERE subcategory_id IN (SELECT id FROM subcategories WHERE category_id = ?)`
-    ).run(categoryId);
+      `UPDATE expenses SET subcategory_id = NULL, subitem_id = NULL
+       WHERE subcategory_id IN (SELECT id FROM subcategories WHERE category_id = ?)
+          OR subitem_id IN (
+            SELECT si.id FROM subitems si
+            JOIN subcategories s ON s.id = si.subcategory_id
+            WHERE s.category_id = ?
+          )`
+    ).run(categoryId, categoryId);
     db!.prepare(
       `DELETE FROM subitems WHERE subcategory_id IN (SELECT id FROM subcategories WHERE category_id = ?)`
     ).run(categoryId);
+    // Регулярные платежи привязаны к справочнику, поэтому их ссылки тоже надо
+    // снять ДО удаления: иначе удаление подкатегории каскадит в статьи, а
+    // платёж продолжает ссылаться на несуществующие строки и SQLite отказывает
+    // по внешнему ключу.
+    db!.prepare(
+      `UPDATE recurring SET subcategory_id = NULL, subitem_id = NULL
+       WHERE subcategory_id IN (SELECT id FROM subcategories WHERE category_id = ?)
+          OR subitem_id IN (
+            SELECT si.id FROM subitems si
+            JOIN subcategories s ON s.id = si.subcategory_id
+            WHERE s.category_id = ?
+          )`
+    ).run(categoryId, categoryId);
+    // А вот у самого recurring.category_id стоит NOT NULL, и подставить ему
+    // нечего: платёж без категории создал бы трату в пустоту. Поэтому такие
+    // платежи удаляются вместе с категорией — их число показывается в
+    // подтверждении, чтобы исчезновение не было сюрпризом.
+    const recurringGone = db!.prepare(
+      'DELETE FROM recurring WHERE category_id = ?'
+    ).run(categoryId);
+    deletedRecurring = recurringGone.changes;
     db!.prepare('DELETE FROM subcategories WHERE category_id = ?').run(categoryId);
     db!.prepare('DELETE FROM categories WHERE id = ?').run(categoryId);
   });
 
-  if (!row) throw new Error('Категория не найдена');
   run(id, row.name, row.is_custom);
-  return { success: true };
+  return { success: true, deletedRecurring };
 });
 
 ipcMain.handle('db:deleteSubcategory', (_, id: number) => {
@@ -522,10 +675,19 @@ ipcMain.handle('db:deleteSubcategory', (_, id: number) => {
         `INSERT OR REPLACE INTO settings (key, value) VALUES (?, datetime('now'))`
       ).run(`deleted_sub:${row.category_name}:${row.name}`);
     }
+    // Траты остаются: теряется привязка к статье и подкатегории, но не сама трата
     db!.prepare(
-      `DELETE FROM expenses WHERE subitem_id IN (SELECT id FROM subitems WHERE subcategory_id = ?)`
-    ).run(subId);
-    db!.prepare('DELETE FROM expenses WHERE subcategory_id = ?').run(subId);
+      `UPDATE expenses SET subcategory_id = NULL, subitem_id = NULL
+       WHERE subcategory_id = ?
+          OR subitem_id IN (SELECT id FROM subitems WHERE subcategory_id = ?)`
+    ).run(subId, subId);
+    // Регулярные платежи переживают удаление подкатегории: теряют привязку,
+    // но напоминание остаётся. Категория у них своя, целая.
+    db!.prepare(
+      `UPDATE recurring SET subcategory_id = NULL, subitem_id = NULL
+       WHERE subcategory_id = ?
+          OR subitem_id IN (SELECT id FROM subitems WHERE subcategory_id = ?)`
+    ).run(subId, subId);
     db!.prepare('DELETE FROM subitems WHERE subcategory_id = ?').run(subId);
     db!.prepare('DELETE FROM subcategories WHERE id = ?').run(subId);
   });
@@ -534,11 +696,14 @@ ipcMain.handle('db:deleteSubcategory', (_, id: number) => {
 });
 
 ipcMain.handle('db:getExpenses', (_, { startDate, endDate }: { startDate: string; endDate: string }) => {
+  // LEFT JOIN, а не JOIN: у траты может не быть категории (удалённую категорию
+  // мы теперь сохраняем), и при INNER JOIN она молча исчезла бы из таблицы,
+  // продолжая при этом влиять на остаток.
   return db!.prepare(`
     SELECT e.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
            s.name as subcategory_name, si.name as subitem_name
     FROM expenses e
-    JOIN categories c ON e.category_id = c.id
+    LEFT JOIN categories c ON e.category_id = c.id
     LEFT JOIN subcategories s ON e.subcategory_id = s.id
     LEFT JOIN subitems si ON e.subitem_id = si.id
     WHERE date(e.date) BETWEEN date(?) AND date(?)
@@ -556,8 +721,25 @@ ipcMain.handle('db:addExpense', (_, expense: { categoryId: number; subcategoryId
     expense.date,
     expense.note || null
   );
-  return { id: result.lastInsertRowid, ...expense };
+  return { id: result.lastInsertRowid, ...expense, warning: checkBackdated(expense.date) };
 });
+
+/**
+ * Последняя отметка «Указать остаток» не позже указанной даты.
+ *
+ * Всё, что записано раньше этой отметки, в остаток не попадает: её сумма уже
+ * включает те операции. Обычно это неудобно, а не опасно, поэтому запись всё
+ * равно создаётся — просто интерфейсу сказать, почему остаток не изменился.
+ */
+function checkBackdated(dateStr: string): string | null {
+  const cp = db!.prepare(
+    `SELECT date(date) AS d FROM balance_history
+     ORDER BY date(date) DESC, created_at DESC LIMIT 1`
+  ).get() as { d: string } | undefined;
+  if (!cp) return null;
+  if (dateStr >= cp.d) return null;
+  return `Остаток указан на ${cp.d}, поэтому эта запись от ${dateStr} в него не вошла. Измените дату отметки остатка, если хотите её учесть.`;
+}
 
 ipcMain.handle('db:deleteExpense', (_, id: number) => {
   db!.prepare('DELETE FROM expenses WHERE id = ?').run(id);
@@ -818,6 +1000,7 @@ ipcMain.handle('db:addDeposit', (_, deposit: { amount: number; date: string; cat
     date: deposit.date,
     category_id: categoryId,
     category_name: category.name,
+    warning: checkBackdated(deposit.date),
   };
 });
 
@@ -878,7 +1061,7 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     SELECT e.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
            s.name as subcategory_name, si.name as subitem_name
     FROM expenses e
-    JOIN categories c ON e.category_id = c.id
+    LEFT JOIN categories c ON e.category_id = c.id
     LEFT JOIN subcategories s ON e.subcategory_id = s.id
     LEFT JOIN subitems si ON e.subitem_id = si.id`;
 
@@ -926,7 +1109,7 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
        ORDER BY date(d.date) DESC, d.created_at DESC`
     ).all(cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate) as typeof deposits;
   } else {
-    const start = getDerivedBalanceAt(startDate);
+    const start = getDerivedBalanceAt(previousDayISO(startDate));
     startAmount = start.balance;
     baseCheckpoint = { amount: start.base, date: start.baseDate };
     expenses = db!.prepare(
@@ -952,7 +1135,9 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
   // Разбивка по трём уровням. Цвет берём из настройки категории — именно
   // его пользователь выбирает для графика.
   const byCategory = expenses.reduce((acc, e) => {
-    const key = e.category_name;
+    // Категории может не быть: её удалили, а трату сохранили. Собираем такие
+    // под отдельным названием, иначе они выпали бы из отчёта совсем.
+    const key = e.category_name || 'Без категории';
     if (!acc[key]) {
       acc[key] = { total: 0, color: e.category_color || null, subcategories: {} };
     }
@@ -1205,6 +1390,23 @@ function parseISODate(iso: string): { y: number; m: number; d: number } {
 function daysInMonth(y: number, m: number): number {
   // День 0 следующего месяца — последний день текущего
   return new Date(y, m, 0).getDate();
+}
+
+/**
+ * Дата за день до указанной.
+ *
+ * Нужна, чтобы получить остаток на НАЧАЛО периода. getDerivedBalanceAt включает
+ * все операции своей даты, поэтому для периода «День» она возвращала бы сумму
+ * уже вместе с сегодняшними операциями: и база отчёта, и его строки считали бы
+ * их дважды, и «Начало» совпадало бы с «На выходе». Заглядывая наканунне,
+ * получаем честное «сколько было до начала периода».
+ */
+function previousDayISO(iso: string): string {
+  const { y, m, d } = parseISODate(iso);
+  const dt = new Date(y, m - 1, d - 1);
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getDate()).padStart(2, '0');
+  return `${dt.getFullYear()}-${mm}-${dd}`;
 }
 
 /**

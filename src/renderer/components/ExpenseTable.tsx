@@ -270,9 +270,12 @@ export default function ExpenseTable({
               </thead>
               <tbody>
                 {expenses.map((expense) => {
-                  const isCustom =
-                    expense.category_name !== 'Закуп' && expense.category_name !== 'Такси';
-                  const badgeClass = getBadgeClass(expense.category_name, isCustom ? 1 : 0);
+                  // Категории может не быть: её удалили, а трату сохранили.
+                  // Без такой подстановки на экране просто была бы пустая
+                  // плашка, и непонятно, что за трата это.
+                  const catName = expense.category_name || 'Без категории';
+                  const isCustom = catName !== 'Закуп' && catName !== 'Такси';
+                  const badgeClass = getBadgeClass(catName, isCustom ? 1 : 0);
                   return (
                     <tr key={expense.id} className="expense-row">
                       <td className="date-cell">
@@ -300,7 +303,7 @@ export default function ExpenseTable({
                             );
                           })()}
                           <span className={`category-badge ${badgeClass}`}>
-                            {expense.category_name}
+                            {catName}
                           </span>
                           {/* Заёмные деньги не считаются расходом в отчёте.
                               Метка объясняет, почему эта трата попала в

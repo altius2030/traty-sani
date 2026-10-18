@@ -36,7 +36,8 @@ export interface Expense {
   amount: number;
   date: string;
   note: string | null;
-  category_name: string;
+  /** null, если категорию удалили, а трату сохранили */
+  category_name: string | null;
   category_icon?: string | null;
   category_color?: string | null;
   subcategory_name: string | null;

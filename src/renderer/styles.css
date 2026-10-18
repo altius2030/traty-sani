@@ -1634,6 +1634,55 @@ input::placeholder {
 }
 
 /* Строка займов под сводкой отчёта: без неё итог не сходится */
+/* Объединение категорий: список с чекбоксами */
+.merge-form {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.merge-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+
+.merge-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  font-size: 13px;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.merge-option:hover {
+  background: var(--bg-hover);
+}
+
+.merge-option.checked {
+  border-color: var(--accent-primary);
+  background: rgba(0, 212, 170, 0.1);
+}
+
+.merge-option input {
+  flex-shrink: 0;
+  accent-color: var(--accent-primary);
+}
+
+.merge-option-sub {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* Метка на записях займа: деньги идут в остаток, но не в доходы/расходы */
 .loan-badge {
   padding: 1px 6px;

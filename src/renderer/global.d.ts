@@ -51,12 +51,30 @@ export interface ElectronAPI {
   renameCategory(id: number, name: string): Promise<{ success: boolean; name: string }>;
   renameSubcategory(id: number, name: string): Promise<{ success: boolean; name: string }>;
   renameSubitem(id: number, name: string): Promise<{ success: boolean; name: string }>;
+  /** Объединение категорий: основная остаётся, остальные переезжают в неё */
+  mergeCategories(payload: {
+    targetId: number;
+    sourceIds: number[];
+  }): Promise<{
+    success: boolean;
+    targetName: string;
+    movedSubcategories: number;
+    mergedSubcategories: number;
+    movedExpenses: number;
+    movedRecurring: number;
+  }>;
   makeBackup(): Promise<{ path: string }>;
   getBackups(): Promise<{ name: string; path: string; size: number }[]>;
   getDeleteImpact(
     kind: 'category' | 'subcategory' | 'subitem',
     id: number
-  ): Promise<{ expenses: number; subcategories: number; subitems: number }>;
+  ): Promise<{
+    expenses: number;
+    subcategories: number;
+    subitems: number;
+    /** Регулярных платежей, которые удалятся вместе с категорией */
+    recurring: number;
+  }>;
   getExpenses(startDate: string, endDate: string): Promise<any[]>;
   addExpense(expense: {
     categoryId: number;
@@ -119,7 +137,14 @@ export interface ElectronAPI {
   }): Promise<any>;
   deleteBalance(id: number): Promise<{ success: boolean }>;
   getDeposits(startDate: string, endDate: string): Promise<any[]>;
-  addDeposit(deposit: { amount: number; date: string; categoryId: number }): Promise<any>;
+  addDeposit(deposit: { amount: number; date: string; categoryId: number }): Promise<{
+    id: number;
+    amount: number;
+    date: string;
+    category_name: string;
+    /** Заполнено, если запись раньше отметки остатка и в него не вошла */
+    warning?: string | null;
+  }>;
   deleteDeposit(id: number): Promise<{ success: boolean }>;
   getDepositCategories(): Promise<DepositCategory[]>;
   addDepositCategory(name: string): Promise<{ id: number; name: string }>;

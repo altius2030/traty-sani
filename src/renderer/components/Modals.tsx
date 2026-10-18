@@ -11,6 +11,7 @@ import {
   Info,
   Pencil,
   Check,
+  GitMerge,
 } from 'lucide-react';
 import type {
   Category,
@@ -696,6 +697,7 @@ interface AddCategoryModalProps {
   onRenameSubcategory: (id: number, name: string) => Promise<void>;
   onRenameSubitem: (id: number, name: string) => Promise<void>;
   onRenameDepositCategory: (id: number, name: string) => Promise<void>;
+  onMergeCategories: (targetId: number, sourceIds: number[]) => Promise<void>;
 }
 
 export function CategoryManagerModal({
@@ -717,6 +719,7 @@ export function CategoryManagerModal({
   onRenameSubcategory,
   onRenameSubitem,
   onRenameDepositCategory,
+  onMergeCategories,
 }: AddCategoryModalProps) {
   const [newCategory, setNewCategory] = useState('');
   const [newSubcategory, setNewSubcategory] = useState<Record<number, string>>({});
@@ -752,6 +755,36 @@ export function CategoryManagerModal({
   const startRename = (key: string, current: string) => {
     setRenameError('');
     setRenaming({ key, draft: current });
+  };
+
+  // ——— Объединение категорий ———
+  // Форма раскрывается по кнопке: объединение нужно редко, а постоянно
+  // висящий список с чекбоксами мешал бы работать с категориями.
+  const [mergeOpen, setMergeOpen] = useState(false);
+  /** Главная категория: та, что останется */
+  const [mergeTarget, setMergeTarget] = useState('');
+  /** Что в неё переедет */
+  const [mergeSources, setMergeSources] = useState<number[]>([]);
+  const [mergeError, setMergeError] = useState('');
+
+  const mergeable = categories.filter((c) => String(c.id) !== mergeTarget);
+
+  const toggleMergeSource = (id: number) => {
+    setMergeSources((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const submitMerge = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mergeTarget || mergeSources.length === 0) return;
+    setMergeError('');
+    try {
+      await onMergeCategories(Number(mergeTarget), mergeSources);
+      setMergeOpen(false);
+      setMergeTarget('');
+      setMergeSources([]);
+    } catch (err) {
+      setMergeError(err instanceof Error ? err.message : 'Не удалось объединить категории');
+    }
   };
 
   const handleAddCategory = (e: React.FormEvent) => {
@@ -1218,6 +1251,100 @@ export function CategoryManagerModal({
 
         {/* Категории внесений живут отдельным справочником: они пришли из
             прежних комментариев и не имеют ничего общего с категориями трат */}
+        <div className="section-divider" />
+
+        {/* Объединение категорий */}
+        <div className="section-divider" />
+
+        {mergeOpen ? (
+          <form className="merge-form" onSubmit={submitMerge}>
+            <div className="breakdown-title">Объединить категории</div>
+
+            <label className="form-group">
+              <span className="form-label">Оставить (основная категория)</span>
+              <select
+                value={mergeTarget}
+                onChange={(e) => {
+                  setMergeTarget(e.target.value);
+                  setMergeSources([]);
+                }}
+              >
+                <option value="">— выбрать —</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {mergeTarget && (
+              <>
+                <div className="field-hint" style={{ marginBottom: 6 }}>
+                  Перенести в неё:
+                </div>
+                <div className="merge-picker">
+                  {mergeable.map((c) => {
+                    const checked = mergeSources.includes(c.id);
+                    const subs = Array.isArray(c.subcategories)
+                      ? (c.subcategories as Subcategory[]).length
+                      : 0;
+                    return (
+                      <label key={c.id} className={`merge-option ${checked ? 'checked' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleMergeSource(c.id)}
+                        />
+                        <span>{c.name}</span>
+                        {subs > 0 && <span className="merge-option-sub">{subs} подк.</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {mergeTarget && mergeSources.length > 0 && (
+              <div className="field-hint">
+                Подкатегории и траты переедут в «
+                {categories.find((c) => String(c.id) === mergeTarget)?.name}». Совпадающие
+                подкатегории сольются в одну. Траты останутся на месте — объединение
+                ничего не удаляет из истории.
+              </div>
+            )}
+
+            {mergeError && <div className="form-error">{mergeError}</div>}
+
+            <div className="recurring-form-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setMergeOpen(false);
+                  setMergeTarget('');
+                  setMergeSources([]);
+                  setMergeError('');
+                }}
+              >
+                Отмена
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={!mergeTarget || mergeSources.length === 0}
+              >
+                Объединить
+              </button>
+            </div>
+          </form>
+        ) : (
+          <button className="recurring-add-trigger" onClick={() => setMergeOpen(true)}>
+            <GitMerge size={16} />
+            Объединить категории
+          </button>
+        )}
+
         <div className="section-divider" />
 
         <div className="section-title">Категории внесений</div>
