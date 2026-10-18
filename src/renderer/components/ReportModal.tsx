@@ -1,6 +1,6 @@
 import { useEffect, useState, Fragment } from 'react';
 import ReportCharts from './ReportCharts';
-import { X, FileDown, TrendingDown, Wallet, Receipt, Banknote, Sheet } from 'lucide-react';
+import { X, FileDown, TrendingDown, Wallet, Receipt, Banknote, Sheet, HandCoins } from 'lucide-react';
 import type { Period, Report } from '../types';
 import { formatMoney, getPeriodLabel } from '../lib/format';
 import { depositColorMap, expenseColorMap } from '../lib/reportColors';
@@ -134,6 +134,24 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
                 </div>
               </div>
             </div>
+            )}
+
+            {/* Движения по займам. Без этой строки итог не сходится: деньги
+                займа меняют остаток, но не являются ни доходом, ни расходом,
+                поэтому в суммы выше они не попали. */}
+            {tab === 'all' && (report.loanTaken > 0 || report.loanRepaid > 0) && (
+              <div className="loan-report-row">
+                <HandCoins size={14} />
+                <span>
+                  Займы: взято <strong>{formatMoney(report.loanTaken)}</strong>, возвращено{' '}
+                  <strong>{formatMoney(report.loanRepaid)}</strong>
+                </span>
+                {report.openLoanDebt > 0 && (
+                  <span className="loan-report-debt">
+                    долг сейчас {formatMoney(report.openLoanDebt)}
+                  </span>
+                )}
+              </div>
             )}
 
             {/* Отдельная сводка по вкладкам «Траты» и «Внесения» */}

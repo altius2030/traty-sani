@@ -47,6 +47,10 @@ export interface ElectronAPI {
   deleteSubitem(id: number): Promise<{ success: boolean }>;
   deleteCategory(id: number): Promise<{ success: boolean }>;
   deleteSubcategory(id: number): Promise<{ success: boolean }>;
+  /** Смена названия. Траты и суммы при этом не теряются: ссылки идут по id */
+  renameCategory(id: number, name: string): Promise<{ success: boolean; name: string }>;
+  renameSubcategory(id: number, name: string): Promise<{ success: boolean; name: string }>;
+  renameSubitem(id: number, name: string): Promise<{ success: boolean; name: string }>;
   makeBackup(): Promise<{ path: string }>;
   getBackups(): Promise<{ name: string; path: string; size: number }[]>;
   getDeleteImpact(
@@ -119,9 +123,62 @@ export interface ElectronAPI {
   deleteDeposit(id: number): Promise<{ success: boolean }>;
   getDepositCategories(): Promise<DepositCategory[]>;
   addDepositCategory(name: string): Promise<{ id: number; name: string }>;
-  deleteDepositCategory(id: number): Promise<{ success: boolean }>;
+  deleteDepositCategory(id: number): Promise<{ success: boolean; deletedDeposits: number }>;
+  renameDepositCategory(id: number, name: string): Promise<{ success: boolean; name: string }>;
   setDepositCategoryColor(id: number, color: string | null): Promise<{ success: boolean }>;
   exportReportXlsx(payload: any): Promise<{ success: boolean; path?: string }>;
+
+  /** Займ: взятые деньги и возвраты не попадают в доходы и расходы */
+  getLoans(): Promise<LoanItem[]>;
+  addLoan(loan: {
+    title: string;
+    source?: string;
+    amount: number;
+    dateTaken: string;
+    dateDue: string;
+    depositCategoryId?: number;
+    note?: string;
+  }): Promise<{ success: boolean; id: number; recordedDeposit: boolean }>;
+  repayLoan(loan: { id: number; amount: number; categoryId: number; date: string }): Promise<{
+    success: boolean;
+    remaining: number;
+  }>;
+  deleteLoan(id: number): Promise<{
+    success: boolean;
+    deletedDeposits: number;
+    deletedExpenses: number;
+    depositSum: number;
+  }>;
+
+  /** Регулярные внесения: выплата агрегатора за вычетом процента */
+  getRecurringIncome(): Promise<RecurringIncomeItem[]>;
+  getDueRecurringIncome(): Promise<RecurringIncomeItem[]>;
+  addRecurringIncome(item: {
+    title: string;
+    categoryId: number;
+    amount: number;
+    commissionPercent: number;
+    frequency: RecurringFrequency;
+    nextDate: string;
+  }): Promise<{ id: number; net: number }>;
+  updateRecurringIncome(item: {
+    id: number;
+    title: string;
+    categoryId: number;
+    amount: number;
+    commissionPercent: number;
+    frequency: RecurringFrequency;
+    nextDate: string;
+  }): Promise<{ success: boolean; net: number }>;
+  toggleRecurringIncome(id: number): Promise<{ success: boolean }>;
+  deleteRecurringIncome(id: number): Promise<{ success: boolean }>;
+  receiveRecurringIncome(id: number): Promise<{
+    success: boolean;
+    net: number;
+    date: string;
+    nextDate: string;
+  }>;
+  getRecurringIncomeMonthlyTotal(): Promise<number>;
   checkUpdate(): Promise<UpdateStatus>;
   downloadUpdate(): Promise<UpdateStatus>;
   installUpdate(): Promise<{ success: boolean; message?: string }>;

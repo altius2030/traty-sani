@@ -302,6 +302,14 @@ export default function ExpenseTable({
                           <span className={`category-badge ${badgeClass}`}>
                             {expense.category_name}
                           </span>
+                          {/* Заёмные деньги не считаются расходом в отчёте.
+                              Метка объясняет, почему эта трата попала в
+                              итог шапки, но не в «Траты» отчёта. */}
+                          {expense.loan_id != null && (
+                            <span className="loan-badge" title="Возврат займа — в отчёте идёт отдельной строкой">
+                              заём
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td style={{ color: 'var(--text-secondary)' }}>
@@ -410,6 +418,15 @@ export default function ExpenseTable({
                       <span style={{ color: 'var(--text-primary)' }}>
                         {deposit.category_name || 'Без категории'}
                       </span>
+                      {/* Деньги займа попадают в остаток, но не в доходы */}
+                      {deposit.loan_id != null && (
+                        <span
+                          className="loan-badge"
+                          title="Деньги займа — в отчёте идут отдельной строкой"
+                        >
+                          заём
+                        </span>
+                      )}
                     </div>
                   </td>
                   <td

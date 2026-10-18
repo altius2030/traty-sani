@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Info,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import type {
   Category,
@@ -688,6 +690,12 @@ interface AddCategoryModalProps {
   onAddDepositCategory: (name: string) => Promise<{ id: number; name: string }>;
   onDeleteDepositCategory: (id: number) => void;
   onSetDepositColor: (id: number, color: string | null) => void;
+  /** Переименование. Возвращает промис, чтобы модалка могла дождаться ответа
+   *  и показать ошибку прямо у поля, а не молча закрыться. */
+  onRenameCategory: (id: number, name: string) => Promise<void>;
+  onRenameSubcategory: (id: number, name: string) => Promise<void>;
+  onRenameSubitem: (id: number, name: string) => Promise<void>;
+  onRenameDepositCategory: (id: number, name: string) => Promise<void>;
 }
 
 export function CategoryManagerModal({
@@ -705,6 +713,10 @@ export function CategoryManagerModal({
   onAddDepositCategory,
   onDeleteDepositCategory,
   onSetDepositColor,
+  onRenameCategory,
+  onRenameSubcategory,
+  onRenameSubitem,
+  onRenameDepositCategory,
 }: AddCategoryModalProps) {
   const [newCategory, setNewCategory] = useState('');
   const [newSubcategory, setNewSubcategory] = useState<Record<number, string>>({});
@@ -713,6 +725,34 @@ export function CategoryManagerModal({
   const [iconPickerFor, setIconPickerFor] = useState<number | null>(null);
   const [colorPickerFor, setColorPickerFor] = useState<number | null>(null);
   const [depositColorFor, setDepositColorFor] = useState<number | null>(null);
+  // Что сейчас переименовываем: ключ — уровень + id, значение — черновик названия.
+  const [renaming, setRenaming] = useState<{ key: string; draft: string } | null>(null);
+  const [renameError, setRenameError] = useState('');
+
+  /**
+   * Общий обработчик для всех четырёх уровней. Поле остаётся открытым при
+   * ошибке — так пользователь видит, что именно не так, и может исправить
+   * название на месте, а не начинать заново.
+   */
+  const submitRename =
+    (run: (draft: string) => Promise<void>) =>
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const draft = (renaming?.draft ?? '').trim();
+      if (!draft || !renaming) return;
+      try {
+        await run(draft);
+        setRenaming(null);
+        setRenameError('');
+      } catch (err) {
+        setRenameError(err instanceof Error ? err.message : 'Не удалось переименовать');
+      }
+    };
+
+  const startRename = (key: string, current: string) => {
+    setRenameError('');
+    setRenaming({ key, draft: current });
+  };
 
   const handleAddCategory = (e: React.FormEvent) => {
     e.preventDefault();
@@ -747,6 +787,13 @@ export function CategoryManagerModal({
             <X size={20} />
           </button>
         </div>
+
+        {renameError && (
+          <div className="field-hint rename-error" role="alert">
+            <AlertCircle size={14} />
+            {renameError}
+          </div>
+        )}
 
         <div className="report-breakdown" style={{ marginTop: 0 }}>
           <div className="breakdown-title">Добавить категорию</div>
@@ -824,13 +871,63 @@ export function CategoryManagerModal({
                       borderColor: cat.color ? cat.color : 'var(--border-color)',
                     }}
                   />
-                  <span style={{ fontWeight: 600 }}>{cat.name}</span>
+                  {renaming?.key === `cat:${cat.id}` ? (
+                    <form
+                      className="rename-form"
+                      onSubmit={submitRename((draft) => onRenameCategory(cat.id, draft))}
+                    >
+                      <input
+                        className="rename-input"
+                        autoFocus
+                        value={renaming.draft}
+                        onChange={(e) =>
+                          setRenaming({ key: `cat:${cat.id}`, draft: e.target.value })
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            setRenaming(null);
+                            setRenameError('');
+                          }
+                        }}
+                      />
+                      <button
+                        type="submit"
+                        className="action-btn"
+                        title="Сохранить"
+                        aria-label="Сохранить название"
+                      >
+                        <Check size={15} color="var(--accent-success)" />
+                      </button>
+                      <button
+                        type="button"
+                        className="action-btn"
+                        onClick={() => {
+                          setRenaming(null);
+                          setRenameError('');
+                        }}
+                        title="Отмена"
+                        aria-label="Отменить переименование"
+                      >
+                        <X size={15} />
+                      </button>
+                    </form>
+                  ) : (
+                    <span style={{ fontWeight: 600 }}>{cat.name}</span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <button
                     className="action-btn"
+                    onClick={() => startRename(`cat:${cat.id}`, cat.name)}
+                    title="Переименовать категорию"
+                    aria-label={`Переименовать категорию ${cat.name}`}
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    className="action-btn"
                     onClick={() => onDeleteCategory(cat.id)}
-                    title="Удалить категорию"
+                    title="Удалить категорию вместе с тратами"
                   >
                     <Trash2 size={16} color="var(--accent-danger)" />
                   </button>
@@ -909,16 +1006,73 @@ export function CategoryManagerModal({
                               padding: '6px 0',
                             }}
                           >
-                            <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-                              {sub.name}
-                            </span>
+                            <div className="manage-cell">
+                            {renaming?.key === `sub:${sub.id}` ? (
+                              <form
+                                className="rename-form"
+                                onSubmit={submitRename((draft) =>
+                                  onRenameSubcategory(sub.id, draft)
+                                )}
+                              >
+                                <input
+                                  className="rename-input"
+                                  style={{ fontSize: 13 }}
+                                  autoFocus
+                                  value={renaming.draft}
+                                  onChange={(e) =>
+                                    setRenaming({ key: `sub:${sub.id}`, draft: e.target.value })
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Escape') {
+                                      setRenaming(null);
+                                      setRenameError('');
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="submit"
+                                  className="action-btn"
+                                  title="Сохранить"
+                                  aria-label="Сохранить название"
+                                >
+                                  <Check size={13} color="var(--accent-success)" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="action-btn"
+                                  onClick={() => {
+                                    setRenaming(null);
+                                    setRenameError('');
+                                  }}
+                                  title="Отмена"
+                                  aria-label="Отменить переименование"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </form>
+                            ) : (
+                              <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+                                {sub.name}
+                              </span>
+                            )}
+                          </div>
+                          <div className="manage-actions">
+                            <button
+                              className="action-btn"
+                              onClick={() => startRename(`sub:${sub.id}`, sub.name)}
+                              title="Переименовать подкатегорию"
+                              aria-label={`Переименовать подкатегорию ${sub.name}`}
+                            >
+                              <Pencil size={13} />
+                            </button>
                             <button
                               className="action-btn"
                               onClick={() => onDeleteSubcategory(sub.id)}
-                              title="Удалить подкатегорию"
+                              title="Удалить подкатегорию вместе с тратами"
                             >
                               <Trash2 size={14} color="var(--accent-danger)" />
                             </button>
+                          </div>
                           </div>
 
                           {/* Третий уровень — статьи */}
@@ -934,16 +1088,76 @@ export function CategoryManagerModal({
                                     padding: '4px 0',
                                   }}
                                 >
-                                  <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                                    {item.name}
-                                  </span>
-                                  <button
-                                    className="action-btn"
-                                    onClick={() => onDeleteSubitem(item.id)}
-                                    title="Удалить статью"
-                                  >
-                                    <Trash2 size={12} color="var(--accent-danger)" />
-                                  </button>
+                                  <div className="manage-cell">
+                                    {renaming?.key === `item:${item.id}` ? (
+                                      <form
+                                        className="rename-form"
+                                        onSubmit={submitRename((draft) =>
+                                          onRenameSubitem(item.id, draft)
+                                        )}
+                                      >
+                                        <input
+                                          className="rename-input"
+                                          style={{ fontSize: 12 }}
+                                          autoFocus
+                                          value={renaming.draft}
+                                          onChange={(e) =>
+                                            setRenaming({
+                                              key: `item:${item.id}`,
+                                              draft: e.target.value,
+                                            })
+                                          }
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Escape') {
+                                              setRenaming(null);
+                                              setRenameError('');
+                                            }
+                                          }}
+                                        />
+                                        <button
+                                          type="submit"
+                                          className="action-btn"
+                                          title="Сохранить"
+                                          aria-label="Сохранить название"
+                                        >
+                                          <Check size={12} color="var(--accent-success)" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="action-btn"
+                                          onClick={() => {
+                                            setRenaming(null);
+                                            setRenameError('');
+                                          }}
+                                          title="Отмена"
+                                          aria-label="Отменить переименование"
+                                        >
+                                          <X size={12} />
+                                        </button>
+                                      </form>
+                                    ) : (
+                                      <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                                        {item.name}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="manage-actions">
+                                    <button
+                                      className="action-btn"
+                                      onClick={() => startRename(`item:${item.id}`, item.name)}
+                                      title="Переименовать статью"
+                                      aria-label={`Переименовать статью ${item.name}`}
+                                    >
+                                      <Pencil size={12} />
+                                    </button>
+                                    <button
+                                      className="action-btn"
+                                      onClick={() => onDeleteSubitem(item.id)}
+                                      title="Удалить статью вместе с тратами"
+                                    >
+                                      <Trash2 size={12} color="var(--accent-danger)" />
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -1009,7 +1223,8 @@ export function CategoryManagerModal({
         <div className="section-title">Категории внесений</div>
         <div className="field-hint" style={{ marginBottom: 10 }}>
           Откуда пришли деньги. Раньше это был свободный комментарий — теперь
-          одинаковые комментарии объединены в одну категорию.
+          одинаковые комментарии объединены в одну категорию. Переименуйте
+          карандашом, удаление убирает вместе с категорией и её внесения.
         </div>
 
         <div className="category-list-manage">
@@ -1030,21 +1245,73 @@ export function CategoryManagerModal({
                   borderColor: c.color ? c.color : 'var(--border-color)',
                 }}
               />
-              <span className="manage-name">{c.name}</span>
+              <div className="manage-cell">
+                {renaming?.key === `dep:${c.id}` ? (
+                  <form
+                    className="rename-form"
+                    onSubmit={submitRename((draft) => onRenameDepositCategory(c.id, draft))}
+                  >
+                    <input
+                      className="rename-input"
+                      autoFocus
+                      value={renaming.draft}
+                      onChange={(e) => setRenaming({ key: `dep:${c.id}`, draft: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          setRenaming(null);
+                          setRenameError('');
+                        }
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      className="action-btn"
+                      title="Сохранить"
+                      aria-label="Сохранить название"
+                    >
+                      <Check size={14} color="var(--accent-success)" />
+                    </button>
+                    <button
+                      type="button"
+                      className="action-btn"
+                      onClick={() => {
+                        setRenaming(null);
+                        setRenameError('');
+                      }}
+                      title="Отмена"
+                      aria-label="Отменить переименование"
+                    >
+                      <X size={14} />
+                    </button>
+                  </form>
+                ) : (
+                  <span className="manage-name">{c.name}</span>
+                )}
+              </div>
               <span className="manage-count">
                 {c.deposits_count ?? 0} внес.
               </span>
-              <button
-                className="action-btn"
-                onClick={() => onDeleteDepositCategory(c.id)}
-                title={
-                  (c.deposits_count ?? 0) > 0
-                    ? `Удалить категорию. ${c.deposits_count} внесений сохранятся, но останутся без категории.`
-                    : 'Удалить категорию'
-                }
-              >
-                <Trash2 size={14} color="var(--accent-danger)" />
-              </button>
+              <div className="manage-actions">
+                <button
+                  className="action-btn"
+                  onClick={() => startRename(`dep:${c.id}`, c.name)}
+                  title="Переименовать категорию внесений"
+                  aria-label={`Переименовать категорию внесений ${c.name}`}
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  className="action-btn"
+                  onClick={() => onDeleteDepositCategory(c.id)}
+                  title={
+                    (c.deposits_count ?? 0) > 0
+                      ? `Удалить категорию вместе с ${c.deposits_count} внесениями. Остаток уменьшится на их сумму.`
+                      : 'Удалить категорию'
+                  }
+                >
+                  <Trash2 size={14} color="var(--accent-danger)" />
+                </button>
+              </div>
 
               {depositColorFor === c.id && (
                 <div className="color-picker deposit-color-picker">

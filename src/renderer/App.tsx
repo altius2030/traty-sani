@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, Save, RefreshCw, Sun, Moon, Repeat } from 'lucide-react';
+import { Wallet, Save, RefreshCw, Sun, Moon, Repeat, HandCoins } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import ExpenseTable from './components/ExpenseTable';
 import AddExpenseModal, {
@@ -14,6 +14,7 @@ import { buildChartCsv } from './components/ReportCharts';
 import { depositColorMap, expenseColorMap } from './lib/reportColors';
 import ToastContainer from './components/ToastContainer';
 import { RecurringModal } from './components/Recurring';
+import { LoansIncomeModal } from './components/Loans';
 import type {
   DepositCategory,
   Category,
@@ -26,6 +27,9 @@ import type {
   ToastType,
   UpdateStatus,
   RecurringItem,
+  RecurringFrequency,
+  LoanItem,
+  RecurringIncomeItem,
 } from './types';
 import type { MainTab } from './components/ExpenseTable';
 import {
@@ -62,6 +66,42 @@ function buildDeleteMessage(
     return `Вы уверены, что хотите удалить ${noun}?`;
   }
   return `Удалить ${noun}? Вместе с ней будут удалены: ${parts.join(' и ')}. Отменить это действие нельзя.`;
+}
+
+/**
+ * Удаление категории внесений уносит с собой и сами внесения. Формулировка
+ * отдельно напоминает про остаток: внесения его увеличивают, поэтому после
+ * удаления денег станет меньше — и без этого предупреждения перемена выглядит
+ * как ошибка программы.
+ */
+function buildDepositCategoryDeleteMessage(name: string, count: number): string {
+  const quoted = name ? `«${name}»` : 'эту категорию';
+  if (count === 0) {
+    return `Удалить категорию внесений ${quoted}?`;
+  }
+  const plural =
+    count % 10 === 1 && count % 100 !== 11
+      ? 'внесение'
+      : count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20)
+      ? 'внесения'
+      : 'внесений';
+  return (
+    `Удалить категорию внесений ${quoted}? Вместе с ней будут удалены ` +
+    `${count} ${plural} — остаток уменьшится на их сумму. Отменить это действие нельзя.`
+  );
+}
+
+/**
+ * Удаление займа уносит и его записи — приход и возвраты. Про остаток говорим
+ * прямо: удаление входящего внесения уменьшает деньги, и без предупреждения
+ * перемена выглядит как ошибка.
+ */
+function buildLoanDeleteMessage(title: string): string {
+  const quoted = title ? `«${title}»` : 'этот заём';
+  return (
+    `Удалить заём ${quoted}? Вместе с ним удалятся его внесение и возвраты — ` +
+    'остаток изменится, а в отчёте пропадёт строка займа. Отменить нельзя.'
+  );
 }
 
 export type Theme = 'dark' | 'light';
@@ -120,6 +160,11 @@ function App() {
   const [dueRecurring, setDueRecurring] = useState<RecurringItem[]>([]);
   const [recurringMonthly, setRecurringMonthly] = useState(0);
 
+  // ——— Займы и регулярные внесения ———
+  const [loans, setLoans] = useState<LoanItem[]>([]);
+  const [recurringIncome, setRecurringIncome] = useState<RecurringIncomeItem[]>([]);
+  const [incomeMonthly, setIncomeMonthly] = useState(0);
+
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next: Theme = prev === 'dark' ? 'light' : 'dark';
@@ -142,6 +187,7 @@ function App() {
     | { type: 'repeatExpense'; expense: Expense }
     | { type: 'repeatDeposit'; deposit: Deposit }
     | { type: 'recurring' }
+    | { type: 'loans' }
     | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<
@@ -152,9 +198,16 @@ function App() {
           | 'category'
           | 'subcategory'
           | 'subitem'
-          | 'recurring';
+          | 'recurring'
+          | 'depositCategory'
+          | 'loan'
+          | 'income';
         id: number;
         impact?: { expenses: number; subcategories: number; subitems?: number };
+        /** Сколько внесений исчезнет вместе с категорией внесений */
+        depositsCount?: number;
+        /** Название категории внесений — для понятного вопроса */
+        depositCategoryName?: string;
         /** Название регулярного платежа — для понятного вопроса */
         title?: string;
       }
@@ -195,6 +248,18 @@ const loadRecurring = useCallback(async () => {
     setRecurring(all);
     setDueRecurring(due);
     setRecurringMonthly(monthly);
+  }, []);
+
+  /** Загрузка займов и регулярных внесений — обе суммы считаются на сервере */
+  const loadLoansAndIncome = useCallback(async () => {
+    const [loansData, incomeData, monthly] = await Promise.all([
+      window.electronAPI.getLoans(),
+      window.electronAPI.getRecurringIncome(),
+      window.electronAPI.getRecurringIncomeMonthlyTotal(),
+    ]);
+    setLoans(loansData);
+    setRecurringIncome(incomeData);
+    setIncomeMonthly(monthly);
   }, []);
 
   // Загрузка данных ———
@@ -295,6 +360,7 @@ const loadRecurring = useCallback(async () => {
           loadBalances(),
           loadDepositCategories(),
           loadRecurring(),
+          loadLoansAndIncome(),
         ]);
       } catch (err) {
         console.error('Ошибка загрузки:', err);
@@ -302,7 +368,13 @@ const loadRecurring = useCallback(async () => {
         setLoading(false);
       }
     })();
-  }, [loadCategories, loadExpenses, loadBalances, loadRecurring]);
+  }, [
+    loadCategories,
+    loadExpenses,
+    loadBalances,
+    loadRecurring,
+    loadLoansAndIncome,
+  ]);
 
   useEffect(() => {
     loadExpenses(period).catch(() => {});
@@ -462,26 +534,41 @@ useEffect(() => {
     }
   };
 
-  /** Удаление категории внесения не трогает сами внесения — пропадает только метка */
-  const handleDeleteDepositCategory = async (id: number) => {
+  /**
+   * Удаление категории внесений убирает вместе с ней и сами внесения — так же,
+   * как категория трат убирает траты. Поэтому спрашиваем подтверждение и прямо
+   * говорим, сколько записей пропадёт: остаток уменьшится на их сумму.
+   */
+  const handleAskDeleteDepositCategory = (id: number) => {
     const cat = depositCategories.find((c) => c.id === id);
-    const count = cat?.deposits_count ?? 0;
-    try {
-      await window.electronAPI.deleteDepositCategory(id);
-      addToast(
-        count > 0
-          ? `Категория удалена. ${count} внес. осталось без категории`
-          : 'Категория удалена',
-        'info'
-      );
-      await Promise.all([loadDepositCategories(), loadExpenses(period)]);
-    } catch (err) {
-      addToast(
-        err instanceof Error ? err.message : 'Не удалось удалить категорию',
-        'error'
-      );
-    }
+    setConfirmDelete({
+      kind: 'depositCategory',
+      id,
+      depositsCount: cat?.deposits_count ?? 0,
+      depositCategoryName: cat?.name ?? '',
+    });
   };
+
+  /** Смена названия на любом из четырёх уровней */
+  const makeRenameHandler =
+    (call: (id: number, name: string) => Promise<{ success: boolean; name: string }>) =>
+    async (id: number, name: string) => {
+      await call(id, name);
+      await Promise.all([loadCategories(), loadDepositCategories(), loadExpenses(period)]);
+    };
+
+  const handleRenameCategory = makeRenameHandler((id, name) =>
+    window.electronAPI.renameCategory(id, name)
+  );
+  const handleRenameSubcategory = makeRenameHandler((id, name) =>
+    window.electronAPI.renameSubcategory(id, name)
+  );
+  const handleRenameSubitem = makeRenameHandler((id, name) =>
+    window.electronAPI.renameSubitem(id, name)
+  );
+  const handleRenameDepositCategory = makeRenameHandler((id, name) =>
+    window.electronAPI.renameDepositCategory(id, name)
+  );
 
   const handleDeleteExpense = (id: number) => {
     setConfirmDelete({ kind: 'expense', id });
@@ -580,6 +667,36 @@ useEffect(() => {
       await window.electronAPI.deleteRecurring(id);
       addToast('Платёж удалён', 'info');
       await loadRecurring();
+    } else if (kind === 'depositCategory') {
+      const removedCount = confirmDelete?.depositsCount ?? 0;
+      await window.electronAPI.deleteDepositCategory(id);
+      addToast(
+        removedCount > 0
+          ? `Категория удалена вместе с ${removedCount} внес.`
+          : 'Категория удалена',
+        'info'
+      );
+      await Promise.all([loadDepositCategories(), loadExpenses(period), loadBalances()]);
+    } else if (kind === 'loan') {
+      const res = await window.electronAPI.deleteLoan(id);
+      await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances()]);
+      const parts: string[] = [];
+      if (res.deletedDeposits > 0) {
+        parts.push(`${res.deletedDeposits} внес.`);
+      }
+      if (res.deletedExpenses > 0) {
+        parts.push(`${res.deletedExpenses} возврат.`);
+      }
+      addToast(
+        parts.length > 0
+          ? `Заём удалён вместе с записями: ${parts.join(', ')}`
+          : 'Заём удалён',
+        'info'
+      );
+    } else if (kind === 'income') {
+      await window.electronAPI.deleteRecurringIncome(id);
+      await loadLoansAndIncome();
+      addToast('Выплата удалена', 'info');
     }
   };
 
@@ -723,6 +840,115 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
       return;
     }
     await handlePayRecurring(match.id);
+  };
+
+  // ——— Займы и регулярные внесения ———
+
+  const handleAddLoan = async (payload: {
+    title: string;
+    source?: string;
+    amount: number;
+    dateTaken: string;
+    dateDue: string;
+    depositCategoryId?: number;
+    note?: string;
+  }) => {
+    const res = await window.electronAPI.addLoan(payload);
+    await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances()]);
+    addToast(
+      res.recordedDeposit
+        ? `Заём заведён, деньги записаны как поступление`
+        : 'Заём заведён',
+      'success'
+    );
+  };
+
+  const handleRepayLoan = async (payload: {
+    id: number;
+    amount: number;
+    categoryId: number;
+    date: string;
+  }) => {
+    const res = await window.electronAPI.repayLoan(payload);
+    await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances()]);
+    addToast(
+      res.remaining > 0.001
+        ? `Возврат записан, осталось ${formatMoney(res.remaining)}`
+        : 'Заём погашен',
+      'success'
+    );
+  };
+
+  const handleDeleteLoan = (id: number) => {
+    const loan = loans.find((l) => l.id === id);
+    setConfirmDelete({
+      kind: 'loan',
+      id,
+      title: loan?.title ?? '',
+      depositsCount: loans.filter((l) => l.remaining > 0.001).length,
+    });
+  };
+
+  const handleAddIncome = async (payload: {
+    title: string;
+    categoryId: number;
+    amount: number;
+    commissionPercent: number;
+    frequency: RecurringFrequency;
+    nextDate: string;
+  }) => {
+    const res = await window.electronAPI.addRecurringIncome(payload);
+    await loadLoansAndIncome();
+    addToast(`Выплата добавлена: на руки ${formatMoney(res.net)}`, 'success');
+  };
+
+  const handleUpdateIncome = async (
+    id: number,
+    payload: {
+      title: string;
+      categoryId: number;
+      amount: number;
+      commissionPercent: number;
+      frequency: RecurringFrequency;
+      nextDate: string;
+    }
+  ) => {
+    const res = await window.electronAPI.updateRecurringIncome({ id, ...payload });
+    await loadLoansAndIncome();
+    addToast(`Сохранено: на руки ${formatMoney(res.net)}`, 'success');
+  };
+
+  /** Отметка выплаты: сервер создаёт внесение на дату выплаты и двигает дату */
+  const handleReceiveIncome = async (id: number) => {
+    try {
+      const res = await window.electronAPI.receiveRecurringIncome(id);
+      await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances()]);
+      const when = new Date(res.date).toLocaleDateString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+      });
+      const next = new Date(res.nextDate).toLocaleDateString('ru-RU', {
+        day: '2-digit',
+        month: '2-digit',
+      });
+      addToast(`Внесено ${formatMoney(res.net)} от ${when}, следующая ${next}`, 'success');
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Не удалось отметить выплату', 'error');
+    }
+  };
+
+  const handleToggleIncome = async (id: number) => {
+    await window.electronAPI.toggleRecurringIncome(id);
+    await loadLoansAndIncome();
+  };
+
+  const handleDeleteIncome = (id: number) => {
+    const item = recurringIncome.find((i) => i.id === id);
+    setConfirmDelete({
+      kind: 'income',
+      id,
+      title: item?.title ?? '',
+    });
   };
 
   /**
@@ -993,6 +1219,17 @@ const handleOpenReleases = async () => {
                 <Repeat size={15} />
                 Регулярные платежи
               </button>
+              <button
+                className="file-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenuOpen(false);
+                  setModal({ type: 'loans' });
+                }}
+              >
+                <HandCoins size={15} />
+                Займы и выплаты
+              </button>
               <div className="file-menu-separator" />
               <div className="file-menu-shortcuts">
                 <div className="file-menu-shortcuts-title">Горячие клавиши</div>
@@ -1150,7 +1387,11 @@ const handleOpenReleases = async () => {
           onDeleteSubitem={askDeleteSubitem}
           depositCategories={depositCategories}
           onAddDepositCategory={handleAddDepositCategory}
-          onDeleteDepositCategory={handleDeleteDepositCategory}
+          onDeleteDepositCategory={handleAskDeleteDepositCategory}
+          onRenameCategory={handleRenameCategory}
+          onRenameSubcategory={handleRenameSubcategory}
+          onRenameSubitem={handleRenameSubitem}
+          onRenameDepositCategory={handleRenameDepositCategory}
           onSetDepositColor={handleSetDepositColor}
         />
       )}
@@ -1187,6 +1428,26 @@ const handleOpenReleases = async () => {
         />
       )}
 
+      {modal?.type === 'loans' && (
+        <LoansIncomeModal
+          loans={loans}
+          income={recurringIncome}
+          depositCategories={depositCategories}
+          expenseCategories={categories}
+          loanDebtTotal={loans.reduce((sum, l) => sum + l.remaining, 0)}
+          incomeMonthlyTotal={incomeMonthly}
+          onClose={() => setModal(null)}
+          onAddLoan={handleAddLoan}
+          onRepayLoan={handleRepayLoan}
+          onDeleteLoan={handleDeleteLoan}
+          onAddIncome={handleAddIncome}
+          onUpdateIncome={handleUpdateIncome}
+          onReceiveIncome={handleReceiveIncome}
+          onToggleIncome={handleToggleIncome}
+          onDeleteIncome={handleDeleteIncome}
+        />
+      )}
+
       {modal?.type === 'update' && (
         <UpdateModal
           status={updateStatus}
@@ -1213,6 +1474,16 @@ const handleOpenReleases = async () => {
               : confirmDelete.kind === 'recurring'
               ? `Удалить регулярный платёж «${confirmDelete.title ?? ''}»? ` +
                 'Траты, которые он уже создал, останутся в истории.'
+              : confirmDelete.kind === 'depositCategory'
+              ? buildDepositCategoryDeleteMessage(
+                  confirmDelete.depositCategoryName ?? '',
+                  confirmDelete.depositsCount ?? 0
+                )
+              : confirmDelete.kind === 'loan'
+              ? buildLoanDeleteMessage(confirmDelete.title ?? '')
+              : confirmDelete.kind === 'income'
+              ? `Удалить выплату «${confirmDelete.title ?? ''}»? Внесения, которые ` +
+                'она уже создала, останутся в истории.'
               : buildDeleteMessage('subitem', confirmDelete.impact)
           }
           confirmText="Удалить"

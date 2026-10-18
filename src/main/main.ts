@@ -241,6 +241,121 @@ ipcMain.handle('db:getCategories', () => {
   `).all();
 });
 
+/**
+ * Проверяет, что такого названия ещё нет — без учёта регистра.
+ *
+ * SQLite здесь не годится: better-sqlite3 собран без ICU, поэтому NOCASE и
+ * lower() считают «зарплата» и «Зарплата» разными строками, и UNIQUE на name
+ * такие дубли пропускает. Поэтому имена запрашиваются и сверяются в JS —
+ * так же, как это делает db:addDepositCategory.
+ *
+ * selectSql уже отфильтровал всё, что можно переименовывать: у подкатегорий и
+ * статей уникальность проверяется только внутри родителя.
+ */
+function assertUniqueName(selectSql: string, params: unknown[], name: string): void {
+  const rows = db!.prepare(selectSql).all(...params) as { name: string }[];
+  const target = name.trim().toLowerCase();
+  if (rows.some((r) => (r.name || '').trim().toLowerCase() === target)) {
+    throw new Error(`«${name}» уже есть`);
+  }
+}
+
+function cleanRenameName(name: string): string {
+  const clean = (name || '').trim().replace(/\s+/g, ' ');
+  if (!clean) throw new Error('Название не может быть пустым');
+  if (clean.length > 100) throw new Error('Название слишком длинное');
+  return clean;
+}
+
+// ——— Переименование ———
+// Траты, подкатегории и статьи ссылаются на справочники по id, поэтому смена
+// названия ничего не ломает: суммы, даты и разбивка по отчётам сохраняются.
+ipcMain.handle('db:renameCategory', (_, id: number, name: string) => {
+  const clean = cleanRenameName(name);
+  const row = db!.prepare('SELECT name, is_custom FROM categories WHERE id = ?').get(id) as
+    | { name: string; is_custom: number }
+    | undefined;
+  if (!row) throw new Error('Категория не найдена');
+  if (row.name === clean) return { success: true, name: clean };
+
+  assertUniqueName('SELECT name FROM categories WHERE id <> ?', [id], clean);
+
+  const run = db!.transaction(() => {
+    // Переименованную встроенную категорию нельзя создавать заново: после
+    // перезапуска applySchema() вернула бы её под старым именем.
+    if (row.is_custom === 0) {
+      db!.prepare(
+        `INSERT OR REPLACE INTO settings (key, value) VALUES (?, datetime('now'))`
+      ).run(`renamed_default:${row.name}`);
+    }
+    db!.prepare('UPDATE categories SET name = ? WHERE id = ?').run(clean, id);
+  });
+  run();
+  return { success: true, name: clean };
+});
+
+ipcMain.handle('db:renameSubcategory', (_, id: number, name: string) => {
+  const clean = cleanRenameName(name);
+  const row = db!.prepare(
+    `SELECT s.name, s.is_custom, s.category_id, c.is_custom AS cat_is_custom
+     FROM subcategories s JOIN categories c ON c.id = s.category_id
+     WHERE s.id = ?`
+  ).get(id) as
+    | { name: string; is_custom: number; category_id: number; cat_is_custom: number }
+    | undefined;
+  if (!row) throw new Error('Подкатегория не найдена');
+  if (row.name === clean) return { success: true, name: clean };
+
+  assertUniqueName(
+    'SELECT name FROM subcategories WHERE category_id = ? AND id <> ?',
+    [row.category_id, id],
+    clean
+  );
+
+  const run = db!.transaction(() => {
+    // Встроенная подкатегория встроенной категории тоже не должна вернуться.
+    // Ключ хранит id родителя, иначе переименование категории его обесценит.
+    if (row.is_custom === 0 || row.cat_is_custom === 0) {
+      db!.prepare(
+        `INSERT OR REPLACE INTO settings (key, value) VALUES (?, datetime('now'))`
+      ).run(`renamed_sub:${row.category_id}:${row.name}`);
+    }
+    db!.prepare('UPDATE subcategories SET name = ? WHERE id = ?').run(clean, id);
+  });
+  run();
+  return { success: true, name: clean };
+});
+
+ipcMain.handle('db:renameSubitem', (_, id: number, name: string) => {
+  const clean = cleanRenameName(name);
+  const row = db!.prepare('SELECT name, subcategory_id FROM subitems WHERE id = ?').get(id) as
+    | { name: string; subcategory_id: number }
+    | undefined;
+  if (!row) throw new Error('Статья не найдена');
+  if (row.name === clean) return { success: true, name: clean };
+
+  assertUniqueName(
+    'SELECT name FROM subitems WHERE subcategory_id = ? AND id <> ?',
+    [row.subcategory_id, id],
+    clean
+  );
+  db!.prepare('UPDATE subitems SET name = ? WHERE id = ?').run(clean, id);
+  return { success: true, name: clean };
+});
+
+ipcMain.handle('db:renameDepositCategory', (_, id: number, name: string) => {
+  const clean = cleanRenameName(name);
+  const row = db!.prepare('SELECT name FROM deposit_categories WHERE id = ?').get(id) as
+    | { name: string }
+    | undefined;
+  if (!row) throw new Error('Категория внесений не найдена');
+  if (row.name === clean) return { success: true, name: clean };
+
+  assertUniqueName('SELECT name FROM deposit_categories WHERE id <> ?', [id], clean);
+  db!.prepare('UPDATE deposit_categories SET name = ? WHERE id = ?').run(clean, id);
+  return { success: true, name: clean };
+});
+
 ipcMain.handle('db:addCategory', (_, name: string) => {
   const clean = (name || '').trim();
   if (!clean) throw new Error('Название категории не может быть пустым');
@@ -479,14 +594,33 @@ interface RestorableDeposit {
  * счёт от максимального id, а не от того, который занимала удалённая строка.
  */
 ipcMain.handle('db:restoreExpense', (_, expense: RestorableExpense) => {
+  // Категорию могли удалить, пока висел тост с отменой. Траты показываются
+  // INNER JOIN'ом по категории, поэтому запись с битой ссылкой исчезла бы из
+  // таблицы и отчёта, но продолжала бы уменьшать остаток — деньги пропали бы
+  // из поля зрения вместе со своим объяснением. Поэтому подставляем любую
+  // существующую категорию трат, а если их нет вовсе — отказываем.
+  let categoryId = Number(expense.category_id);
+  const stillThere = db!.prepare('SELECT id FROM categories WHERE id = ?').get(categoryId);
+  if (!stillThere) {
+    const fallback = db!.prepare(
+      "SELECT id FROM categories WHERE type = 'expense' ORDER BY sort_order, id LIMIT 1"
+    ).get() as { id: number } | undefined;
+    if (!fallback) {
+      throw new Error('Категория траты удалена — вернуть запись некуда. Создайте категорию.');
+    }
+    categoryId = fallback.id;
+  }
+
   db!.prepare(
     `INSERT INTO expenses (id, category_id, subcategory_id, subitem_id, amount, date, note, created_at)
      VALUES (@id, @category_id, @subcategory_id, @subitem_id, @amount, @date, @note, @created_at)`
   ).run({
     id: expense.id,
-    category_id: expense.category_id,
-    subcategory_id: expense.subcategory_id ?? null,
-    subitem_id: expense.subitem_id ?? null,
+    category_id: categoryId,
+    // Подкатегория и статья могли исчезнуть вместе со своей категорией —
+    // тогда оставляем трату на верхнем уровне, это честнее битой ссылки.
+    subcategory_id: categoryId === expense.category_id ? (expense.subcategory_id ?? null) : null,
+    subitem_id: categoryId === expense.category_id ? (expense.subitem_id ?? null) : null,
     amount: expense.amount,
     date: expense.date,
     note: expense.note ?? null,
@@ -626,14 +760,25 @@ ipcMain.handle('db:addDepositCategory', (_, name: string) => {
 });
 
 ipcMain.handle('db:deleteDepositCategory', (_, id: number) => {
-  // Внесения не удаляем — терять деньги из-за удаления справочника нельзя.
-  // Категория у них просто пропадает, суммы и даты остаются.
+  const row = db!.prepare('SELECT name FROM deposit_categories WHERE id = ?').get(id) as
+    | { name: string }
+    | undefined;
+  if (!row) throw new Error('Категория внесений не найдена');
+
+  const count = db!.prepare('SELECT COUNT(*) c FROM deposits WHERE category_id = ?').get(id) as {
+    c: number;
+  };
+
+  // Внесения удаляются вместе с категорией — по симметрии с категориями трат.
+  // Раньше здесь стояло обнуление category_id, и деньги оставались в базе без
+  // категории: суммы в отчётах сохранялись, но вклад «Яндекс» из отчёта по
+  // внесениям исчезал молча, а баланс менялся без видимой причины.
   const run = db!.transaction((catId: number) => {
-    db!.prepare(`UPDATE deposits SET category_id = NULL WHERE category_id = ?`).run(catId);
+    db!.prepare(`DELETE FROM deposits WHERE category_id = ?`).run(catId);
     db!.prepare(`DELETE FROM deposit_categories WHERE id = ?`).run(catId);
   });
   run(id);
-  return { success: true };
+  return { success: true, deletedDeposits: count.c };
 });
 
 ipcMain.handle('db:setDepositCategoryColor', (_, id: number, color: string | null) => {
@@ -686,6 +831,15 @@ ipcMain.handle('db:deleteDeposit', (_, id: number) => {
  * отмены удаления в таблице появился бы дубль.
  */
 ipcMain.handle('db:restoreDeposit', (_, deposit: RestorableDeposit) => {
+  // Категорию внесений могли удалить, пока висел тост с отменой. Внесения
+  // допускают пустую категорию (поле NULL), поэтому просто обнуляем ссылку:
+  // сумма, дата и порядок сохраняются, ничего не теряется.
+  let categoryId: number | null = deposit.category_id ?? null;
+  if (categoryId !== null) {
+    const stillThere = db!.prepare('SELECT id FROM deposit_categories WHERE id = ?').get(categoryId);
+    if (!stillThere) categoryId = null;
+  }
+
   db!.prepare(
     `INSERT INTO deposits (id, amount, date, category_id, note, created_at)
      VALUES (@id, @amount, @date, @category_id, @note, @created_at)`
@@ -693,7 +847,7 @@ ipcMain.handle('db:restoreDeposit', (_, deposit: RestorableDeposit) => {
     id: deposit.id,
     amount: deposit.amount,
     date: deposit.date,
-    category_id: deposit.category_id ?? null,
+    category_id: categoryId,
     note: deposit.note ?? null,
     created_at: deposit.created_at,
   });
@@ -763,10 +917,12 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     expenses = db!.prepare(
       `${EXPENSE_SELECT}
        WHERE ${AFTER_CP}
+         AND e.loan_id IS NULL
        ORDER BY date(e.date) DESC`
     ).all(cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate) as typeof expenses;
     deposits = db!.prepare(
       `${DEPOSIT_SELECT} WHERE ${DEPOSIT_AFTER_CP}
+         AND d.loan_id IS NULL
        ORDER BY date(d.date) DESC, d.created_at DESC`
     ).all(cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate) as typeof deposits;
   } else {
@@ -776,11 +932,13 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     expenses = db!.prepare(
       `${EXPENSE_SELECT}
        WHERE date(e.date) BETWEEN date(?) AND date(?)
+         AND e.loan_id IS NULL
        ORDER BY date(e.date) DESC`
     ).all(startDate, endDate) as typeof expenses;
     deposits = db!.prepare(
       `${DEPOSIT_SELECT}
        WHERE date(d.date) BETWEEN date(?) AND date(?)
+         AND d.loan_id IS NULL
        ORDER BY date(d.date) DESC, d.created_at DESC`
     ).all(startDate, endDate) as typeof deposits;
   }
@@ -833,12 +991,48 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     return acc;
   }, {} as Record<string, { total: number; color: string | null }>);
 
+  // Движения по займам за период. Они убраны из totalDeposits и totalExpenses,
+// потому что заёмные деньги — не доход и не расход, но остаток они меняют.
+// Поэтому показываем их отдельными строками: с ними арифметика отчёта
+// сходится, start + внесения + займы - траты - возвраты = end.
+const loanFlowWhere = cpInPeriod
+  ? `${AFTER_CP}`
+  : `date(date) BETWEEN date(?) AND date(?)`;
+const loanFlowParams = cpInPeriod
+  ? [cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate]
+  : [startDate, endDate];
+
+const loanIn = db!.prepare(
+  `SELECT COALESCE(SUM(amount), 0) AS s FROM deposits
+   WHERE loan_id IS NOT NULL AND ${loanFlowWhere}`
+).get(...loanFlowParams) as { s: number };
+
+const loanOut = db!.prepare(
+  `SELECT COALESCE(SUM(amount), 0) AS s FROM expenses
+   WHERE loan_id IS NOT NULL AND ${loanFlowWhere}`
+).get(...loanFlowParams) as { s: number };
+
+const loanRows = db!.prepare(
+  `${LOAN_SELECT} ORDER BY l.date_due, l.id`
+).all() as LoanRow[];
+const loans = withRemaining(loanRows);
+// В отчёте интересуют только займы, которые попали в период или ещё не закрыты
+const reportLoans = loans.filter(
+  (l) => l.remaining > 0.001 || l.date_taken >= startDate || l.taken > 0
+);
+const openLoanDebt = loans.reduce((sum, l) => sum + l.remaining, 0);
+
   return {
     startBalance: startAmount,
     // Деньги на выходе: после всех внесений и вычетов
     endBalance: end.balance,
     totalExpenses,
     totalDeposits,
+    // Движения по займам — отдельно от доходов и расходов
+    loanTaken: loanIn.s,
+    loanRepaid: loanOut.s,
+    openLoanDebt,
+    loans: reportLoans,
     baseCheckpoint,
     expenses,
     deposits,
@@ -1246,6 +1440,355 @@ ipcMain.handle('db:getRecurringMonthlyTotal', () => {
   };
 
   return rows.reduce((sum, r) => sum + r.amount * perMonth[r.frequency], 0);
+});
+
+// ——— Займы ———
+
+/**
+ * Остаток по займу берётся из связанных записей, а не из отдельного поля
+ * «возвращено»: возврат — это обычная трата с пометкой loan_id, и отдельный
+ * счётчик рано или поздно разошёлся бы с реальными записями.
+ */
+const LOAN_SELECT = `
+  SELECT l.*,
+    COALESCE((SELECT SUM(amount) FROM deposits WHERE loan_id = l.id), 0) AS taken,
+    COALESCE((SELECT SUM(amount) FROM expenses  WHERE loan_id = l.id), 0) AS repaid
+  FROM loans l
+`;
+
+interface LoanRow {
+  id: number;
+  title: string;
+  source: string | null;
+  amount: number;
+  date_taken: string;
+  date_due: string;
+  note: string | null;
+  taken: number;
+  repaid: number;
+}
+
+function withRemaining(rows: LoanRow[]) {
+  const today = todayISO();
+  return rows.map((r) => ({
+    ...r,
+    remaining: Math.max(0, r.taken - r.repaid),
+    // Просрочка считается по оставшемуся долгу: погашенный заём тревогу
+    // вызывать не должен даже с датой в прошлом.
+    is_overdue: r.taken - r.repaid > 0.001 && r.date_due < today,
+  }));
+}
+
+ipcMain.handle('db:getLoans', () => {
+  const rows = db!.prepare(`${LOAN_SELECT} ORDER BY l.date_due, l.id`).all() as LoanRow[];
+  return withRemaining(rows);
+});
+
+/**
+ * Создание займа вместе с внесением пришедших денег.
+ *
+ * Внесение и заём создаются одной транзакцией: если деньги пришли, а запись о
+ * займе не завелась, получится расход без источника, и вернуть его будет нечем.
+ * Пометка loan_id связывает их и убирает из статистики доходов.
+ */
+ipcMain.handle(
+  'db:addLoan',
+  (
+    _,
+    p: {
+      title: string;
+      source?: string;
+      amount: number;
+      dateTaken: string;
+      dateDue: string;
+      depositCategoryId?: number;
+      note?: string;
+    }
+  ) => {
+    const title = (p.title || '').trim();
+    if (!title) throw new Error('Название займа не может быть пустым');
+    const amount = Number(p.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Сумма займа должна быть больше нуля');
+    }
+    for (const [label, value] of [
+      ['дата получения', p.dateTaken],
+      ['дата возврата', p.dateDue],
+    ] as const) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(value || '')) throw new Error(`Некорректная ${label}`);
+    }
+
+    const catId = Number(p.depositCategoryId);
+    let categoryName: string | null = null;
+    if (Number.isFinite(catId) && catId > 0) {
+      const cat = db!.prepare('SELECT name FROM deposit_categories WHERE id = ?').get(catId) as
+        | { name: string }
+        | undefined;
+      if (!cat) throw new Error('Категория внесения не найдена');
+      categoryName = cat.name;
+    }
+
+    let loanId = 0;
+    const run = db!.transaction(() => {
+      const res = db!
+        .prepare(
+          `INSERT INTO loans (title, source, amount, date_taken, date_due, note)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          title,
+          (p.source || '').trim() || null,
+          amount,
+          p.dateTaken,
+          p.dateDue,
+          (p.note || '').trim() || null
+        );
+      loanId = Number(res.lastInsertRowid);
+
+      if (categoryName) {
+        db!.prepare(
+          `INSERT INTO deposits (amount, date, category_id, loan_id) VALUES (?, ?, ?, ?)`
+        ).run(amount, p.dateTaken, catId, loanId);
+      }
+    });
+    run();
+
+    return { success: true, id: loanId, recordedDeposit: Boolean(categoryName) };
+  }
+);
+
+/** Возврат части или всей суммы: создаёт трату с пометкой loan_id */
+ipcMain.handle(
+  'db:repayLoan',
+  (_, p: { id: number; amount: number; categoryId: number; date: string }) => {
+    const amount = Number(p.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Сумма возврата должна быть больше нуля');
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date || '')) throw new Error('Некорректная дата');
+    const catId = Number(p.categoryId);
+    const cat = db!.prepare('SELECT name FROM categories WHERE id = ?').get(catId) as
+      | { name: string }
+      | undefined;
+    if (!cat) throw new Error('Категория траты не найдена');
+
+    const row = db!.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(p.id) as LoanRow | undefined;
+    if (!row) throw new Error('Заём не найден');
+
+    const run = db!.transaction(() => {
+      db!.prepare(
+        `INSERT INTO expenses (category_id, amount, date, note, loan_id) VALUES (?, ?, ?, ?, ?)`
+      ).run(catId, amount, p.date, `Возврат: ${row.title}`, p.id);
+    });
+    run();
+
+    const fresh = db!.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(p.id) as LoanRow;
+    return { success: true, remaining: Math.max(0, fresh.taken - fresh.repaid) };
+  }
+);
+
+/**
+ * Удаление займа уносит и связанные записи — по тем же правилам, что удаление
+ * категории трат. Иначе деньги займа остались бы в базе, потеряв связь с
+ * причиной, и в отчёте выглядели бы обычным доходом.
+ * Возвращаем счётчики: остаток уменьшится на сумму удалённого внесения.
+ */
+ipcMain.handle('db:deleteLoan', (_, id: number) => {
+  const counts = db!.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM deposits WHERE loan_id = ?) AS deposits,
+       (SELECT COUNT(*) FROM expenses  WHERE loan_id = ?) AS expenses,
+       (SELECT COALESCE(SUM(amount), 0) FROM deposits WHERE loan_id = ?) AS depositSum`
+  ).get(id, id, id) as { deposits: number; expenses: number; depositSum: number };
+
+  const run = db!.transaction(() => {
+    db!.prepare('DELETE FROM deposits WHERE loan_id = ?').run(id);
+    db!.prepare('DELETE FROM expenses WHERE loan_id = ?').run(id);
+    db!.prepare('DELETE FROM loans WHERE id = ?').run(id);
+  });
+  run();
+
+  return {
+    success: true,
+    deletedDeposits: counts.deposits,
+    deletedExpenses: counts.expenses,
+    depositSum: counts.depositSum,
+  };
+});
+
+// ——— Регулярные внесения ———
+
+/** Сумма к получению после удержания процента платформой */
+function netIncome(amount: number, commission: number): number {
+  return Math.round(amount * (1 - commission) * 100) / 100;
+}
+
+const RECURRING_INCOME_SELECT = `
+  SELECT r.*, c.name AS category_name, c.color AS category_color
+  FROM recurring_income r
+  JOIN deposit_categories c ON r.category_id = c.id
+`;
+
+interface RecurringIncomeRow {
+  id: number;
+  title: string;
+  category_id: number;
+  amount: number;
+  commission: number;
+  frequency: RecurringFrequency;
+  next_date: string;
+  is_active: number;
+  category_name: string;
+}
+
+function validateCommission(percent: number): number {
+  const p = Number(percent);
+  if (!Number.isFinite(p) || p < 0 || p >= 100) {
+    throw new Error('Процент должен быть от 0 до 99');
+  }
+  return p / 100;
+}
+
+ipcMain.handle('db:getRecurringIncome', () => {
+  const rows = db!.prepare(
+    `${RECURRING_INCOME_SELECT} ORDER BY r.is_active DESC, r.next_date`
+  ).all() as RecurringIncomeRow[];
+  return rows.map((r) => ({ ...r, net: netIncome(r.amount, r.commission) }));
+});
+
+/** Выплаты, срок которых наступил — их показывает блок «Пора получить» */
+ipcMain.handle('db:getDueRecurringIncome', () => {
+  const today = todayISO();
+  const rows = db!.prepare(
+    `${RECURRING_INCOME_SELECT} WHERE r.is_active = 1 AND r.next_date <= ? ORDER BY r.next_date, r.title`
+  ).all(today) as RecurringIncomeRow[];
+  return rows.map((r) => ({ ...r, net: netIncome(r.amount, r.commission) }));
+});
+
+ipcMain.handle(
+  'db:addRecurringIncome',
+  (
+    _,
+    p: {
+      title: string;
+      categoryId: number;
+      amount: number;
+      commissionPercent: number;
+      frequency: RecurringFrequency;
+      nextDate: string;
+    }
+  ) => {
+    const title = (p.title || '').trim();
+    if (!title) throw new Error('Название не может быть пустым');
+    const amount = Number(p.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Сумма должна быть больше нуля');
+    }
+    const commission = validateCommission(p.commissionPercent);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.nextDate || '')) throw new Error('Некорректная дата');
+    const cat = db!.prepare('SELECT id FROM deposit_categories WHERE id = ?').get(p.categoryId);
+    if (!cat) throw new Error('Категория внесения не найдена');
+
+    const result = db!.prepare(
+      `INSERT INTO recurring_income (title, category_id, amount, commission, frequency, next_date)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(title, p.categoryId, amount, commission, p.frequency, p.nextDate);
+    return { id: Number(result.lastInsertRowid), net: netIncome(amount, commission) };
+  }
+);
+
+ipcMain.handle(
+  'db:updateRecurringIncome',
+  (
+    _,
+    p: {
+      id: number;
+      title: string;
+      categoryId: number;
+      amount: number;
+      commissionPercent: number;
+      frequency: RecurringFrequency;
+      nextDate: string;
+    }
+  ) => {
+    const title = (p.title || '').trim();
+    if (!title) throw new Error('Название не может быть пустым');
+    const amount = Number(p.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Сумма должна быть больше нуля');
+    }
+    const commission = validateCommission(p.commissionPercent);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.nextDate || '')) throw new Error('Некорректная дата');
+    const cat = db!.prepare('SELECT id FROM deposit_categories WHERE id = ?').get(p.categoryId);
+    if (!cat) throw new Error('Категория внесения не найдена');
+
+    db!.prepare(
+      `UPDATE recurring_income
+       SET title = ?, category_id = ?, amount = ?, commission = ?, frequency = ?, next_date = ?
+       WHERE id = ?`
+    ).run(title, p.categoryId, amount, commission, p.frequency, p.nextDate, p.id);
+    return { success: true, net: netIncome(amount, commission) };
+  }
+);
+
+ipcMain.handle('db:toggleRecurringIncome', (_, id: number) => {
+  db!.prepare('UPDATE recurring_income SET is_active = 1 - is_active WHERE id = ?').run(id);
+  return { success: true };
+});
+
+ipcMain.handle('db:deleteRecurringIncome', (_, id: number) => {
+  // Внесения, которые он уже создал, остаются: удаляется напоминание,
+  // а не история поступлений.
+  db!.prepare('DELETE FROM recurring_income WHERE id = ?').run(id);
+  return { success: true };
+});
+
+/**
+ * Отметка выплаты полученной.
+ *
+ * Внесение создаётся на дату выплаты, а не на сегодня — иначе выплата,
+ * пришедшая в пятницу и отмеченная в понедельник, попала бы в другой месяц.
+ * Дата сразу сдвигается до будущего: пропущенные выплаты не копятся,
+ * одна отметка закрывает всю задолженность, как и у регулярных платежей.
+ */
+ipcMain.handle('db:receiveRecurringIncome', (_, id: number) => {
+  const row = db!.prepare(`${RECURRING_INCOME_SELECT} WHERE r.id = ?`).get(id) as
+    | RecurringIncomeRow
+    | undefined;
+  if (!row) throw new Error('Выплата не найдена');
+
+  const net = netIncome(row.amount, row.commission);
+  const nextDate = advanceUntilFuture(row.next_date, row.frequency, todayISO());
+
+  const run = db!.transaction(() => {
+    db!.prepare(
+      `INSERT INTO deposits (amount, date, category_id, note) VALUES (?, ?, ?, ?)`
+    ).run(net, row.next_date, row.category_id, row.title);
+    db!.prepare('UPDATE recurring_income SET next_date = ? WHERE id = ?').run(nextDate, id);
+  });
+  run();
+
+  return { success: true, net, date: row.next_date, nextDate };
+});
+
+/** Сколько постоянно приходит в месяц — уже после удержания процентов */
+ipcMain.handle('db:getRecurringIncomeMonthlyTotal', () => {
+  const rows = db!.prepare(
+    `SELECT amount, commission, frequency FROM recurring_income WHERE is_active = 1`
+  ).all() as { amount: number; commission: number; frequency: RecurringFrequency }[];
+
+  const perMonth: Record<RecurringFrequency, number> = {
+    daily: 30,
+    weekly: 4.345,
+    monthly: 1,
+    quarterly: 1 / 3,
+    yearly: 1 / 12,
+  };
+
+  return rows.reduce(
+    (sum, r) => sum + netIncome(r.amount, r.commission) * perMonth[r.frequency],
+    0
+  );
 });
 
 // ——— Обновление приложения ———

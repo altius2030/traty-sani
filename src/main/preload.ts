@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteSubitem: (id: number) => ipcRenderer.invoke('db:deleteSubitem', id),
   deleteCategory: (id: number) => ipcRenderer.invoke('db:deleteCategory', id),
   deleteSubcategory: (id: number) => ipcRenderer.invoke('db:deleteSubcategory', id),
+  renameCategory: (id: number, name: string) => ipcRenderer.invoke('db:renameCategory', id, name),
+  renameSubcategory: (id: number, name: string) => ipcRenderer.invoke('db:renameSubcategory', id, name),
+  renameSubitem: (id: number, name: string) => ipcRenderer.invoke('db:renameSubitem', id, name),
 
   makeBackup: () => ipcRenderer.invoke('db:makeBackup'),
   getBackups: () => ipcRenderer.invoke('db:getBackups'),
@@ -54,9 +57,50 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDepositCategories: () => ipcRenderer.invoke('db:getDepositCategories'),
   addDepositCategory: (name: string) => ipcRenderer.invoke('db:addDepositCategory', name),
   deleteDepositCategory: (id: number) => ipcRenderer.invoke('db:deleteDepositCategory', id),
+  renameDepositCategory: (id: number, name: string) => ipcRenderer.invoke('db:renameDepositCategory', id, name),
   setDepositCategoryColor: (id: number, color: string | null) =>
     ipcRenderer.invoke('db:setDepositCategoryColor', id, color),
   exportReportXlsx: (payload: any) => ipcRenderer.invoke('report:exportXlsx', payload),
+
+  // Займы: деньги пришли и ушли, но ни доходом, ни расходом не являются
+  getLoans: () => ipcRenderer.invoke('db:getLoans'),
+  addLoan: (loan: {
+    title: string;
+    source?: string;
+    amount: number;
+    dateTaken: string;
+    dateDue: string;
+    depositCategoryId?: number;
+    note?: string;
+  }) => ipcRenderer.invoke('db:addLoan', loan),
+  repayLoan: (loan: { id: number; amount: number; categoryId: number; date: string }) =>
+    ipcRenderer.invoke('db:repayLoan', loan),
+  deleteLoan: (id: number) => ipcRenderer.invoke('db:deleteLoan', id),
+
+  // Регулярные внесения: выплаты агрегаторов с удержанием процента
+  getRecurringIncome: () => ipcRenderer.invoke('db:getRecurringIncome'),
+  getDueRecurringIncome: () => ipcRenderer.invoke('db:getDueRecurringIncome'),
+  addRecurringIncome: (item: {
+    title: string;
+    categoryId: number;
+    amount: number;
+    commissionPercent: number;
+    frequency: string;
+    nextDate: string;
+  }) => ipcRenderer.invoke('db:addRecurringIncome', item),
+  updateRecurringIncome: (item: {
+    id: number;
+    title: string;
+    categoryId: number;
+    amount: number;
+    commissionPercent: number;
+    frequency: string;
+    nextDate: string;
+  }) => ipcRenderer.invoke('db:updateRecurringIncome', item),
+  toggleRecurringIncome: (id: number) => ipcRenderer.invoke('db:toggleRecurringIncome', id),
+  deleteRecurringIncome: (id: number) => ipcRenderer.invoke('db:deleteRecurringIncome', id),
+  receiveRecurringIncome: (id: number) => ipcRenderer.invoke('db:receiveRecurringIncome', id),
+  getRecurringIncomeMonthlyTotal: () => ipcRenderer.invoke('db:getRecurringIncomeMonthlyTotal'),
   
   getReport: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getReport', { startDate, endDate }),
   saveFile: (defaultPath: string, content: string) => ipcRenderer.invoke('dialog:saveFile', defaultPath, content),

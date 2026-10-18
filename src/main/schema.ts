@@ -136,6 +136,55 @@ export const SCHEMA_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_recurring_next ON recurring(is_active, next_date);
+
+  -- Заём: взяли деньги, чтобы оплатить закуп, вернём через пару дней.
+  --
+  -- Деньги проходят через обычные deposits и expenses — остаток считается
+  -- сам по себе, формулу трогать не нужно. А вот для статистики такие записи
+  -- не должны выглядеть доходом и расходом: кредит — это чужие деньги.
+  -- Поэтому на записях ставится loan_id, а отчёты их исключают и показывают
+  -- отдельным разделом. Без этого месяц с кредитом показывал бы двойной
+  -- расход и ненулевой доход, которого не было.
+  CREATE TABLE IF NOT EXISTS loans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    -- Кто дал: банк, человек, касса. Свободный текст.
+    source TEXT,
+    amount REAL NOT NULL CHECK (amount > 0),
+    -- Когда взяли
+    date_taken TEXT NOT NULL,
+    -- Когда вернуть. По этой дате считается просрочка.
+    date_due TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_loans_due ON loans(date_due);
+
+  -- Регулярное внесение: выплата агрегатора раз в неделю.
+  --
+  -- Отдельная таблица, а не флаг в recurring: там траты (расходы), здесь
+  -- поступления. Общего только способ сдвига даты — advanceRecurringDate.
+  CREATE TABLE IF NOT EXISTS recurring_income (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    category_id INTEGER NOT NULL,
+    -- Сумма ДО удержания процента платформой
+    amount REAL NOT NULL CHECK (amount > 0),
+    -- Доля удержания: 0.25 = 25%. Хранится долей, а не процентами,
+    -- чтобы умножение работало напрямую: net = amount * (1 - commission)
+    commission REAL NOT NULL DEFAULT 0
+      CHECK (commission >= 0 AND commission < 1),
+    -- daily | weekly | monthly | quarterly | yearly
+    frequency TEXT NOT NULL,
+    next_date TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (category_id) REFERENCES deposit_categories(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_recurring_income_next
+    ON recurring_income(is_active, next_date);
 `;
 
 export const DEFAULT_CATEGORIES: { name: string; type: string; sortOrder: number }[] = [
@@ -419,12 +468,28 @@ export function applySchema(database: Database): void {
   );
 
   // Категории, которые пользователь удалил осознанно, больше не создаём.
+  // Сюда же попадают переименованные встроенные категории: если «Закуп» назвали
+  // «Покупки», то старый ключ deleted_default:Закуп убережёт от возврата.
   const dismissed = new Set(
     (
       database
-        .prepare(`SELECT key FROM settings WHERE key LIKE 'deleted_default:%'`)
+        .prepare(
+          `SELECT key FROM settings
+           WHERE key LIKE 'deleted_default:%' OR key LIKE 'renamed_default:%'`
+        )
         .all() as { key: string }[]
-    ).map((r) => r.key.replace('deleted_default:', ''))
+    ).map((r) => r.key.replace(/^(?:deleted|renamed)_default:/, ''))
+  );
+
+  // Подкатегории, переименованные у встроенных категорий. Ключ хранит id
+  // родителя, а не его имя: иначе переименование самой категории делало бы
+  // запись бессмысленной и подкатегория вернулась бы при следующем запуске.
+  const renamedSubs = new Set(
+    (
+      database
+        .prepare(`SELECT key FROM settings WHERE key LIKE 'renamed_sub:%'`)
+        .all() as { key: string }[]
+    ).map((r) => r.key.slice('renamed_sub:'.length))
   );
 
   for (const cat of DEFAULT_CATEGORIES) {
@@ -449,6 +514,7 @@ export function applySchema(database: Database): void {
   if (categoryMap['Закуп']) {
     ZAKUP_SUBCATEGORIES.forEach((sub, idx) => {
       if (dismissedSubs.has(`Закуп:${sub}`)) return;
+      if (renamedSubs.has(`${categoryMap['Закуп']}:${sub}`)) return;
       insertSubcategory.run(categoryMap['Закуп'], sub, idx + 1);
     });
   }
@@ -481,4 +547,23 @@ export function applySchema(database: Database): void {
   database.exec(`
     CREATE INDEX IF NOT EXISTS idx_deposits_category ON deposits(category_id);
   `);
+
+  // Миграция 1.0.22: пометка записей, относящихся к займу.
+  //
+  // Колонка nullable: обычные траты и внесения ничего не знают о займах и
+  // остаются как были. Отчёты отбирают «loan_id IS NULL», поэтому старые
+  // записи продолжают попадать в обычную статистику без всякой правки.
+  const depositColsFull = database.prepare('PRAGMA table_info(deposits)').all() as {
+    name: string;
+  }[];
+  if (!depositColsFull.some((c) => c.name === 'loan_id')) {
+    database.exec(`ALTER TABLE deposits ADD COLUMN loan_id INTEGER`);
+    console.log('[schema] Добавлена колонка deposits.loan_id');
+  }
+  if (!expenseCols.some((c) => c.name === 'loan_id')) {
+    database.exec(`ALTER TABLE expenses ADD COLUMN loan_id INTEGER`);
+    console.log('[schema] Добавлена колонка expenses.loan_id');
+  }
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_loans_link_deposit ON deposits(loan_id)`);
+  database.exec(`CREATE INDEX IF NOT EXISTS idx_loans_link_expense ON expenses(loan_id)`);
 }
