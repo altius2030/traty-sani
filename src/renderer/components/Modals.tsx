@@ -19,8 +19,9 @@ import type {
   Subitem,
   DepositCategory,
   UpdateStatus,
+  AccountBalance,
 } from '../types';
-import { toISODate } from '../lib/format';
+import { toISODate, formatMoney } from '../lib/format';
 import { CATEGORY_ICONS, getCategoryIcon, CHART_COLORS } from '../lib/icons';
 
 interface AddExpenseModalProps {
@@ -39,7 +40,12 @@ interface AddExpenseModalProps {
     note?: string | null;
     subcategoryId?: number | null;
     subitemId?: number | null;
+    accountId?: number | null;
   };
+  /** Счета для выбора; первый (или отмеченный is_default) подставляется сам */
+  accounts?: AccountBalance[];
+  /** Счёт, выбранный в боковой панели — форма его подхватит */
+  preselectedAccountId?: number | null;
   onClose: () => void;
   onSubmit: (data: {
     categoryId: number;
@@ -48,6 +54,7 @@ interface AddExpenseModalProps {
     amount: number;
     date: string;
     note?: string;
+    accountId?: number;
   }) => void;
 }
 
@@ -57,9 +64,18 @@ export default function AddExpenseModal({
   preselectedSubcategoryId,
   preselectedSubitemId,
   prefill,
+  accounts = [],
+  preselectedAccountId,
   onClose,
   onSubmit,
 }: AddExpenseModalProps) {
+  const defaultAccountId =
+    preselectedAccountId ??
+    prefill?.accountId ??
+    accounts.find((a) => a.is_default === 1)?.id ??
+    accounts[0]?.id ??
+    null;
+  const [accountId, setAccountId] = useState<number | ''>(defaultAccountId ?? '');
   const [categoryId, setCategoryId] = useState<number>(
     preselectedCategoryId ?? categories[0]?.id ?? 0
   );
@@ -120,6 +136,7 @@ export default function AddExpenseModal({
       amount: amountNum,
       date,
       note: note.trim() || undefined,
+      accountId: accountId === '' ? undefined : Number(accountId),
     });
   };
 
@@ -227,6 +244,29 @@ export default function AddExpenseModal({
                 required
               />
             </div>
+
+            {/* Счёт показываем, только когда их больше одного: при единственном
+                выбирать не из чего, а лишнее поле в форме только мешает. */}
+            {accounts.length > 1 && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="expense-account">
+                  Счёт
+                </label>
+                <select
+                  id="expense-account"
+                  value={accountId}
+                  onChange={(e) =>
+                    setAccountId(e.target.value === '' ? '' : Number(e.target.value))
+                  }
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} — {formatMoney(a.balance)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="form-group">
@@ -261,11 +301,13 @@ export default function AddExpenseModal({
 interface AddDepositModalProps {
   depositCategories: DepositCategory[];
   onClose: () => void;
-  onSubmit: (data: { amount: number; date: string; categoryId: number }) => void;
+  onSubmit: (data: { amount: number; date: string; categoryId: number; accountId?: number }) => void;
   /** Создание новой категории прямо из формы */
   onAddCategory: (name: string) => Promise<{ id: number; name: string }>;
   /** Данные для кнопки «Повторить»; дата всегда сегодняшняя */
-  prefill?: { amount?: number | null; categoryId?: number | null };
+  prefill?: { amount?: number | null; categoryId?: number | null; accountId?: number | null };
+  accounts?: AccountBalance[];
+  preselectedAccountId?: number | null;
 }
 
 /**
@@ -279,7 +321,16 @@ export function AddDepositModal({
   onSubmit,
   onAddCategory,
   prefill,
+  accounts = [],
+  preselectedAccountId,
 }: AddDepositModalProps) {
+  const [accountId, setAccountId] = useState<number | ''>(
+    preselectedAccountId ??
+      prefill?.accountId ??
+      accounts.find((a) => a.is_default === 1)?.id ??
+      accounts[0]?.id ??
+      ''
+  );
   const [amount, setAmount] = useState(
     prefill?.amount != null ? String(prefill.amount) : ''
   );
@@ -297,7 +348,12 @@ export function AddDepositModal({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!amountValid || !categoryValid) return;
-    onSubmit({ amount: amountNum, date, categoryId: Number(categoryId) });
+    onSubmit({
+      amount: amountNum,
+      date,
+      categoryId: Number(categoryId),
+      accountId: accountId === '' ? undefined : Number(accountId),
+    });
   };
 
   const handleCreateCategory = async () => {
@@ -358,6 +414,27 @@ export function AddDepositModal({
                 required
               />
             </div>
+
+            {accounts.length > 1 && (
+              <div className="form-group">
+                <label className="form-label" htmlFor="deposit-account">
+                  Счёт
+                </label>
+                <select
+                  id="deposit-account"
+                  value={accountId}
+                  onChange={(e) =>
+                    setAccountId(e.target.value === '' ? '' : Number(e.target.value))
+                  }
+                >
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} — {formatMoney(a.balance)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="form-group">
@@ -450,13 +527,18 @@ export function AddDepositModal({
 
 interface AddBalanceModalProps {
   onClose: () => void;
-  onSubmit: (data: { amount: number; date: string; note?: string }) => void;
+  onSubmit: (data: { amount: number; date: string; note?: string; accountId?: number }) => void;
+  accounts?: AccountBalance[];
+  preselectedAccountId?: number | null;
 }
 
-export function AddBalanceModal({ onClose, onSubmit }: AddBalanceModalProps) {
+export function AddBalanceModal({ onClose, onSubmit, accounts = [], preselectedAccountId }: AddBalanceModalProps) {
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(toISODate(new Date()));
   const [note, setNote] = useState('');
+  const [accountId, setAccountId] = useState<number | ''>(
+    preselectedAccountId ?? accounts.find((a) => a.is_default === 1)?.id ?? accounts[0]?.id ?? ''
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -466,6 +548,7 @@ export function AddBalanceModal({ onClose, onSubmit }: AddBalanceModalProps) {
       amount: amountNum,
       date,
       note: note.trim() || undefined,
+      accountId: accountId === '' ? undefined : Number(accountId),
     });
   };
 
@@ -508,6 +591,31 @@ export function AddBalanceModal({ onClose, onSubmit }: AddBalanceModalProps) {
               required
             />
           </div>
+
+          {accounts.length > 1 && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="balance-account">
+                Счёт
+              </label>
+              <select
+                id="balance-account"
+                value={accountId}
+                onChange={(e) =>
+                  setAccountId(e.target.value === '' ? '' : Number(e.target.value))
+                }
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} — {formatMoney(a.balance)}
+                  </option>
+                ))}
+              </select>
+              <div className="field-hint" style={{ marginTop: 6 }}>
+                Отметка относится к одному счёту. Чтобы задать остаток по всем —
+                сделайте это на каждом отдельно.
+              </div>
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label" htmlFor="balance-note">

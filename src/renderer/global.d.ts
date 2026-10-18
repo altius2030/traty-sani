@@ -5,6 +5,8 @@ import type {
   RecurringItem,
   RecurringFrequency,
   RecurringOccurrence,
+  AccountBalance,
+  TransferItem,
 } from './types';
 
 export type UpdateState =
@@ -75,7 +77,11 @@ export interface ElectronAPI {
     /** Регулярных платежей, которые удалятся вместе с категорией */
     recurring: number;
   }>;
-  getExpenses(startDate: string, endDate: string): Promise<any[]>;
+  getExpenses(
+    startDate: string,
+    endDate: string,
+    accountId?: number | null
+  ): Promise<Expense[]>;
   addExpense(expense: {
     categoryId: number;
     subcategoryId?: number;
@@ -136,7 +142,11 @@ export interface ElectronAPI {
     note?: string;
   }): Promise<any>;
   deleteBalance(id: number): Promise<{ success: boolean }>;
-  getDeposits(startDate: string, endDate: string): Promise<any[]>;
+  getDeposits(
+    startDate: string,
+    endDate: string,
+    accountId?: number | null
+  ): Promise<Deposit[]>;
   addDeposit(deposit: { amount: number; date: string; categoryId: number }): Promise<{
     id: number;
     amount: number;
@@ -152,6 +162,26 @@ export interface ElectronAPI {
   renameDepositCategory(id: number, name: string): Promise<{ success: boolean; name: string }>;
   setDepositCategoryColor(id: number, color: string | null): Promise<{ success: boolean }>;
   exportReportXlsx(payload: any): Promise<{ success: boolean; path?: string }>;
+
+  /** Счета и перемещения между ними */
+  getAccountBalances(): Promise<AccountBalance[]>;
+  addAccount(account: {
+    name: string;
+    kind?: string;
+    color?: string | null;
+  }): Promise<{ id: number; name: string }>;
+  renameAccount(id: number, name: string): Promise<{ success: boolean }>;
+  setAccountColor(id: number, color: string | null): Promise<{ success: boolean }>;
+  deleteAccount(id: number): Promise<{ success: boolean }>;
+  getTransfers(range: { startDate: string; endDate: string }): Promise<TransferItem[]>;
+  addTransfer(transfer: {
+    fromAccountId: number;
+    toAccountId: number;
+    amount: number;
+    date: string;
+    note?: string;
+  }): Promise<{ id: number }>;
+  deleteTransfer(id: number): Promise<{ success: boolean }>;
 
   /** Займ: взятые деньги и возвраты не попадают в доходы и расходы */
   getLoans(): Promise<LoanItem[]>;

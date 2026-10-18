@@ -38,6 +38,8 @@ export interface Expense {
   note: string | null;
   /** null, если категорию удалили, а трату сохранили */
   category_name: string | null;
+  /** Счёт, к которому относится трата */
+  account_id?: number | null;
   category_icon?: string | null;
   category_color?: string | null;
   subcategory_name: string | null;
@@ -76,6 +78,8 @@ export interface Deposit {
   category_id: number | null;
   /** Название категории; null, если категория была удалена */
   category_name: string | null;
+  /** Счёт, к которому относится внесение */
+  account_id?: number | null;
   /** Заполнено, если внесение — это деньги займа */
   loan_id?: number | null;
   /** Исторический комментарий; сохраняется при отмене удаления */
@@ -129,6 +133,46 @@ export interface RecurringOccurrence {
   amount: number;
   category_name: string;
   category_color: string | null;
+}
+
+/**
+ * Денежный счёт: наличные, карта, вклад.
+ *
+ * Счёт не меняет сути операций — он только отвечает на вопрос «чьи это деньги».
+ * Общий остаток остаётся суммой по всем счетам, а перевод между своими
+ * счетами не является ни расходом, ни доходом.
+ */
+export interface AccountItem {
+  id: number;
+  name: string;
+  /** 'card' | 'cash' — влияет только на подсказку в форме */
+  kind: string;
+  color: string | null;
+  sort_order: number;
+  is_default: number;
+}
+
+export interface AccountBalance extends AccountItem {
+  /** Остаток на этом счёте */
+  balance: number;
+  /** На какой отметке он посчитан */
+  base: number;
+  baseDate: string | null;
+}
+
+/** Перевод между своими счетами: деньги те же, место другое */
+export interface TransferItem {
+  id: number;
+  from_account_id: number;
+  to_account_id: number;
+  from_name: string;
+  from_color: string | null;
+  to_name: string;
+  to_color: string | null;
+  amount: number;
+  date: string;
+  note: string | null;
+  created_at: string;
 }
 
 /**

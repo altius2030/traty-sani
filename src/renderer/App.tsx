@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Wallet, Save, RefreshCw, Sun, Moon, Repeat, HandCoins } from 'lucide-react';
+import { Wallet, Save, RefreshCw, Sun, Moon, Repeat, HandCoins, ArrowLeftRight } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import ExpenseTable from './components/ExpenseTable';
 import AddExpenseModal, {
@@ -15,6 +15,7 @@ import { depositColorMap, expenseColorMap } from './lib/reportColors';
 import ToastContainer from './components/ToastContainer';
 import { RecurringModal } from './components/Recurring';
 import { LoansIncomeModal } from './components/Loans';
+import { TransferModal } from './components/Transfers';
 import type {
   DepositCategory,
   Category,
@@ -30,6 +31,8 @@ import type {
   RecurringFrequency,
   LoanItem,
   RecurringIncomeItem,
+  AccountBalance,
+  TransferItem,
 } from './types';
 import type { MainTab } from './components/ExpenseTable';
 import {
@@ -174,6 +177,11 @@ function App() {
   const [recurringIncome, setRecurringIncome] = useState<RecurringIncomeItem[]>([]);
   const [incomeMonthly, setIncomeMonthly] = useState(0);
 
+  // ——— Счета и перемещения ———
+  const [accounts, setAccounts] = useState<AccountBalance[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [transfers, setTransfers] = useState<TransferItem[]>([]);
+
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
       const next: Theme = prev === 'dark' ? 'light' : 'dark';
@@ -197,6 +205,7 @@ function App() {
     | { type: 'repeatDeposit'; deposit: Deposit }
     | { type: 'recurring' }
     | { type: 'loans' }
+    | { type: 'transfers' }
     | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<
@@ -276,6 +285,26 @@ const loadRecurring = useCallback(async () => {
     setIncomeMonthly(monthly);
   }, []);
 
+  /**
+   * Загрузка счетов и переводов.
+   *
+   * Счета тянутся всегда, переводы — только за текущий период: список нужен
+   * ради остатков по счетам, а переводы показываются в окне, которое открывают
+   * изредка.
+   */
+  const loadAccounts = useCallback(async () => {
+    const data = await window.electronAPI.getAccountBalances();
+    setAccounts(data);
+  }, []);
+
+  const loadTransfers = useCallback(async () => {
+    const data = await window.electronAPI.getTransfers({
+      startDate: period.startDate,
+      endDate: period.endDate,
+    });
+    setTransfers(data);
+  }, [period]);
+
   // Загрузка данных ———
   const loadCategories = useCallback(async () => {
     const data = await window.electronAPI.getCategories();
@@ -287,15 +316,21 @@ const loadRecurring = useCallback(async () => {
     return normalized;
   }, []);
 
-  const loadExpenses = useCallback(async (p: Period) => {
-    const [expenseData, depositData] = await Promise.all([
-      window.electronAPI.getExpenses(p.startDate, p.endDate),
-      window.electronAPI.getDeposits(p.startDate, p.endDate),
-    ]);
-    setExpenses(expenseData);
-    setDeposits(depositData);
-    setLoading(false);
-  }, []);
+  const loadExpenses = useCallback(
+    async (p: Period) => {
+      // Фильтр по счёту уходит в базу, а не в память: это жёсткая граница
+      // «покажи только эти деньги», а не поиск по тексту. Поиск остаётся
+      // в памяти — период и так загружен целиком.
+      const [expenseData, depositData] = await Promise.all([
+        window.electronAPI.getExpenses(p.startDate, p.endDate, selectedAccountId),
+        window.electronAPI.getDeposits(p.startDate, p.endDate, selectedAccountId),
+      ]);
+      setExpenses(expenseData);
+      setDeposits(depositData);
+      setLoading(false);
+    },
+    [selectedAccountId]
+  );
 
   /**
    * Фильтрация выполняется в памяти: период уже загружен целиком, а
@@ -375,6 +410,7 @@ const loadRecurring = useCallback(async () => {
           loadDepositCategories(),
           loadRecurring(),
           loadLoansAndIncome(),
+          loadAccounts(),
         ]);
       } catch (err) {
         console.error('Ошибка загрузки:', err);
@@ -388,11 +424,20 @@ const loadRecurring = useCallback(async () => {
     loadBalances,
     loadRecurring,
     loadLoansAndIncome,
+    loadAccounts,
   ]);
 
   useEffect(() => {
     loadExpenses(period).catch(() => {});
   }, [period, loadExpenses]);
+
+  // Переводы нужны только внутри окна переводов. Грузим при открытии, а не
+  // всегда: список привязан к периоду, и держать его в памяти постоянно
+  // незачем.
+  useEffect(() => {
+    if (modal?.type !== 'transfers') return;
+    loadTransfers().catch(() => {});
+  }, [modal?.type, loadTransfers]);
 
   /**
  * Горячие клавиши.
@@ -997,6 +1042,58 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
     });
   };
 
+  // ——— Счета и перемещения ———
+
+  const handleAddAccount = async (name: string) => {
+    await window.electronAPI.addAccount({ name });
+    await Promise.all([loadAccounts(), loadBalances()]);
+    addToast(`Счёт «${name}» добавлен`, 'success');
+  };
+
+  const handleRenameAccount = async (id: number, name: string) => {
+    try {
+      await window.electronAPI.renameAccount(id, name);
+      await loadAccounts();
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Не удалось переименовать счёт', 'error');
+      throw err;
+    }
+  };
+
+  const handleDeleteAccount = async (id: number) => {
+    const acc = accounts.find((a) => a.id === id);
+    try {
+      await window.electronAPI.deleteAccount(id);
+      // Выбранный счёт мог исчезнуть — тогда возвращаемся к «всем счетам».
+      if (selectedAccountId === id) setSelectedAccountId(null);
+      await Promise.all([loadAccounts(), loadBalances(), loadTransfers()]);
+      addToast(
+        acc ? `Счёт «${acc.name}» удалён, операции перешли на основной` : 'Счёт удалён',
+        'info'
+      );
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Не удалось удалить счёт', 'error');
+    }
+  };
+
+  const handleAddTransfer = async (payload: {
+    fromAccountId: number;
+    toAccountId: number;
+    amount: number;
+    date: string;
+    note?: string;
+  }) => {
+    await window.electronAPI.addTransfer(payload);
+    await Promise.all([loadAccounts(), loadTransfers(), loadBalances()]);
+    addToast(`Перевод ${formatMoney(payload.amount)} записан`, 'success');
+  };
+
+  const handleDeleteTransfer = async (id: number) => {
+    await window.electronAPI.deleteTransfer(id);
+    await Promise.all([loadAccounts(), loadTransfers(), loadBalances()]);
+    addToast('Перевод удалён', 'info');
+  };
+
   /**
  * Загрузка месяца для календаря.
  *
@@ -1276,6 +1373,17 @@ const handleOpenReleases = async () => {
                 <HandCoins size={15} />
                 Займы и выплаты
               </button>
+              <button
+                className="file-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenuOpen(false);
+                  setModal({ type: 'transfers' });
+                }}
+              >
+                <ArrowLeftRight size={15} />
+                Переводы между счетами
+              </button>
               <div className="file-menu-separator" />
               <div className="file-menu-shortcuts">
                 <div className="file-menu-shortcuts-title">Горячие клавиши</div>
@@ -1339,6 +1447,13 @@ const handleOpenReleases = async () => {
           recurringMonthly={recurringMonthly}
           onPayRecurring={handlePayRecurring}
           onOpenRecurringManager={() => setModal({ type: 'recurring' })}
+          accounts={accounts}
+          selectedAccountId={selectedAccountId}
+          onSelectAccount={setSelectedAccountId}
+          onAddAccount={handleAddAccount}
+          onRenameAccount={handleRenameAccount}
+          onDeleteAccount={handleDeleteAccount}
+          onOpenTransfer={() => setModal({ type: 'transfers' })}
         />
 
         <ExpenseTable
@@ -1371,6 +1486,8 @@ const handleOpenReleases = async () => {
       {modal?.type === 'expense' && (
         <AddExpenseModal
           categories={categories}
+          accounts={accounts}
+          preselectedAccountId={selectedAccountId}
           preselectedCategoryId={modal.categoryId}
           preselectedSubcategoryId={modal.subcategoryId}
           preselectedSubitemId={modal.subitemId}
@@ -1383,12 +1500,15 @@ const handleOpenReleases = async () => {
       {modal?.type === 'repeatExpense' && (
         <AddExpenseModal
           categories={categories}
+          accounts={accounts}
+          preselectedAccountId={selectedAccountId}
           preselectedCategoryId={modal.expense.category_id}
           prefill={{
             amount: modal.expense.amount,
             note: modal.expense.note,
             subcategoryId: modal.expense.subcategory_id,
             subitemId: modal.expense.subitem_id,
+            accountId: modal.expense.account_id,
           }}
           onClose={() => setModal(null)}
           onSubmit={handleAddExpense}
@@ -1398,6 +1518,8 @@ const handleOpenReleases = async () => {
       {modal?.type === 'deposit' && (
         <AddDepositModal
           depositCategories={depositCategories}
+          accounts={accounts}
+          preselectedAccountId={selectedAccountId}
           onClose={() => setModal(null)}
           onSubmit={handleAddDeposit}
           onAddCategory={handleAddDepositCategory}
@@ -1408,7 +1530,13 @@ const handleOpenReleases = async () => {
       {modal?.type === 'repeatDeposit' && (
         <AddDepositModal
           depositCategories={depositCategories}
-          prefill={{ amount: modal.deposit.amount, categoryId: modal.deposit.category_id }}
+          accounts={accounts}
+          preselectedAccountId={selectedAccountId}
+          prefill={{
+            amount: modal.deposit.amount,
+            categoryId: modal.deposit.category_id,
+            accountId: modal.deposit.account_id,
+          }}
           onClose={() => setModal(null)}
           onSubmit={handleAddDeposit}
           onAddCategory={handleAddDepositCategory}
@@ -1416,7 +1544,12 @@ const handleOpenReleases = async () => {
       )}
 
       {modal?.type === 'balance' && (
-        <AddBalanceModal onClose={() => setModal(null)} onSubmit={handleAddBalance} />
+        <AddBalanceModal
+          accounts={accounts}
+          preselectedAccountId={selectedAccountId}
+          onClose={() => setModal(null)}
+          onSubmit={handleAddBalance}
+        />
       )}
 
       {modal?.type === 'categories' && (
@@ -1492,6 +1625,16 @@ const handleOpenReleases = async () => {
           onReceiveIncome={handleReceiveIncome}
           onToggleIncome={handleToggleIncome}
           onDeleteIncome={handleDeleteIncome}
+        />
+      )}
+
+      {modal?.type === 'transfers' && (
+        <TransferModal
+          accounts={accounts}
+          transfers={transfers}
+          onClose={() => setModal(null)}
+          onAdd={handleAddTransfer}
+          onDelete={handleDeleteTransfer}
         />
       )}
 

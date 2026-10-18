@@ -695,34 +695,75 @@ ipcMain.handle('db:deleteSubcategory', (_, id: number) => {
   return { success: true };
 });
 
-ipcMain.handle('db:getExpenses', (_, { startDate, endDate }: { startDate: string; endDate: string }) => {
-  // LEFT JOIN, а не JOIN: у траты может не быть категории (удалённую категорию
-  // мы теперь сохраняем), и при INNER JOIN она молча исчезла бы из таблицы,
-  // продолжая при этом влиять на остаток.
-  return db!.prepare(`
-    SELECT e.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
-           s.name as subcategory_name, si.name as subitem_name
-    FROM expenses e
-    LEFT JOIN categories c ON e.category_id = c.id
-    LEFT JOIN subcategories s ON e.subcategory_id = s.id
-    LEFT JOIN subitems si ON e.subitem_id = si.id
-    WHERE date(e.date) BETWEEN date(?) AND date(?)
-    ORDER BY date(e.date) DESC, e.created_at DESC
-  `).all(startDate, endDate);
-});
+ipcMain.handle(
+  'db:getExpenses',
+  (
+    _,
+    {
+      startDate,
+      endDate,
+      accountId,
+    }: {
+      startDate: string;
+      endDate: string;
+      /** null — все счета */
+      accountId?: number | null;
+    }
+  ) => {
+    // LEFT JOIN, а не JOIN: у траты может не быть категории (удалённую категорию
+    // мы теперь сохраняем), и при INNER JOIN она молча исчезла бы из таблицы,
+    // продолжая при этом влиять на остаток.
+    const byAccount = accountId != null && accountId > 0;
+    return db!.prepare(
+      `SELECT e.*, c.name as category_name, c.icon as category_icon, c.color as category_color,
+              s.name as subcategory_name, si.name as subitem_name
+       FROM expenses e
+       LEFT JOIN categories c ON e.category_id = c.id
+       LEFT JOIN subcategories s ON e.subcategory_id = s.id
+       LEFT JOIN subitems si ON e.subitem_id = si.id
+       WHERE date(e.date) BETWEEN date(?) AND date(?)
+         ${byAccount ? 'AND e.account_id = ?' : ''}
+       ORDER BY date(e.date) DESC, e.created_at DESC`
+    ).all(...(byAccount ? [startDate, endDate, accountId] : [startDate, endDate]));
+  }
+);
 
-ipcMain.handle('db:addExpense', (_, expense: { categoryId: number; subcategoryId?: number; subitemId?: number; amount: number; date: string; note?: string }) => {
-  const stmt = db!.prepare('INSERT INTO expenses (category_id, subcategory_id, subitem_id, amount, date, note) VALUES (?, ?, ?, ?, ?, ?)');
+ipcMain.handle('db:addExpense', (_, expense: { categoryId: number; subcategoryId?: number; subitemId?: number; amount: number; date: string; note?: string; accountId?: number }) => {
+  const accountId = resolveAccount(expense.accountId);
+  const stmt = db!.prepare(
+    'INSERT INTO expenses (category_id, subcategory_id, subitem_id, amount, date, note, account_id) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  );
   const result = stmt.run(
     expense.categoryId,
     expense.subcategoryId || null,
     expense.subitemId || null,
     expense.amount,
     expense.date,
-    expense.note || null
+    expense.note || null,
+    accountId
   );
   return { id: result.lastInsertRowid, ...expense, warning: checkBackdated(expense.date) };
 });
+
+/**
+ * Приводит переданный счёт к существующему id.
+ *
+ * Формы иногда присылают пустое или протухшее значение (счёт удалили, пока был
+ * открыт диалог). Тогда берём счёт по умолчанию — запись не должна теряться
+ * из-за того, что счёт исчез из-под формы.
+ */
+function resolveAccount(accountId?: number | null): number {
+  const id = Number(accountId);
+  if (Number.isFinite(id) && id > 0) {
+    const exists = db!.prepare('SELECT id FROM accounts WHERE id = ?').get(id);
+    if (exists) return id;
+  }
+  const fallback = db!.prepare('SELECT id FROM accounts WHERE is_default = 1').get() as
+    | { id: number }
+    | undefined;
+  if (!fallback) throw new Error('Нет ни одного счёта — создайте счёт в боковой панели');
+  return fallback.id;
+}
 
 /**
  * Последняя отметка «Указать остаток» не позже указанной даты.
@@ -882,9 +923,16 @@ ipcMain.handle('db:getCurrentBalance', () => {
   return getDerivedBalanceAt(`${y}-${m}-${d}`);
 });
 
-ipcMain.handle('db:addBalance', (_, balance: { amount: number; date: string; note?: string }) => {
-  const stmt = db!.prepare('INSERT INTO balance_history (amount, date, note) VALUES (?, ?, ?)');
-  const result = stmt.run(balance.amount, balance.date, balance.note || null);
+ipcMain.handle('db:addBalance', (_, balance: { amount: number; date: string; note?: string; accountId?: number }) => {
+  const stmt = db!.prepare(
+    'INSERT INTO balance_history (amount, date, note, account_id) VALUES (?, ?, ?, ?)'
+  );
+  const result = stmt.run(
+    balance.amount,
+    balance.date,
+    balance.note || null,
+    resolveAccount(balance.accountId)
+  );
   return { id: result.lastInsertRowid, ...balance };
 });
 
@@ -894,15 +942,27 @@ ipcMain.handle('db:deleteBalance', (_, id: number) => {
 });
 
 // ——— Внесения денег ———
-ipcMain.handle('db:getDeposits', (_, { startDate, endDate }: { startDate: string; endDate: string }) => {
-  return db!.prepare(`
-    SELECT d.*, c.name as category_name
-    FROM deposits d
-    LEFT JOIN deposit_categories c ON d.category_id = c.id
-    WHERE date(d.date) BETWEEN date(?) AND date(?)
-    ORDER BY date(d.date) DESC, d.created_at DESC
-  `).all(startDate, endDate);
-});
+ipcMain.handle(
+  'db:getDeposits',
+  (
+    _,
+    {
+      startDate,
+      endDate,
+      accountId,
+    }: { startDate: string; endDate: string; accountId?: number | null }
+  ) => {
+    const byAccount = accountId != null && accountId > 0;
+    return db!.prepare(
+      `SELECT d.*, c.name as category_name
+       FROM deposits d
+       LEFT JOIN deposit_categories c ON d.category_id = c.id
+       WHERE date(d.date) BETWEEN date(?) AND date(?)
+         ${byAccount ? 'AND d.account_id = ?' : ''}
+       ORDER BY date(d.date) DESC, d.created_at DESC`
+    ).all(...(byAccount ? [startDate, endDate, accountId] : [startDate, endDate]));
+  }
+);
 
 // ——— Категории внесений ———
 ipcMain.handle('db:getDepositCategories', () => {
@@ -969,7 +1029,7 @@ ipcMain.handle('db:setDepositCategoryColor', (_, id: number, color: string | nul
   return { success: true };
 });
 
-ipcMain.handle('db:addDeposit', (_, deposit: { amount: number; date: string; categoryId: number }) => {
+ipcMain.handle('db:addDeposit', (_, deposit: { amount: number; date: string; categoryId: number; accountId?: number }) => {
   // Валидация на сервере: дублируем проверки из UI, чтобы обойти их было нельзя.
   const amount = Number(deposit.amount);
   const categoryId = Number(deposit.categoryId);
@@ -991,9 +1051,9 @@ ipcMain.handle('db:addDeposit', (_, deposit: { amount: number; date: string; cat
   }
 
   const stmt = db!.prepare(
-    `INSERT INTO deposits (amount, date, category_id) VALUES (?, ?, ?)`
+    `INSERT INTO deposits (amount, date, category_id, account_id) VALUES (?, ?, ?, ?)`
   );
-  const result = stmt.run(amount, deposit.date, categoryId);
+  const result = stmt.run(amount, deposit.date, categoryId, resolveAccount(deposit.accountId));
   return {
     id: result.lastInsertRowid,
     amount,
@@ -1642,6 +1702,203 @@ ipcMain.handle('db:getRecurringMonthlyTotal', () => {
   };
 
   return rows.reduce((sum, r) => sum + r.amount * perMonth[r.frequency], 0);
+});
+
+// ——— Счета и перемещения ———
+
+/**
+ * Остаток по каждому счёту.
+ *
+ * Общий остаток не изменился: перевод уходит из одного счёта и приходит в
+ * другой, в сумме ноль. Но покомпонентно каждый счёт меняется, и именно это
+ * показывают карточки в боковой панели.
+ *
+ * Расчёт по счёту повторяет общий: от последней отметки остатка на этом счёте
+ * плюс внесения, минус траты, плюс переводы в минус переводы из.
+ */
+ipcMain.handle('db:getAccountBalances', () => {
+  const accounts = db!.prepare('SELECT * FROM accounts ORDER BY sort_order, id').all() as {
+    id: number;
+    name: string;
+    kind: string;
+    color: string | null;
+    sort_order: number;
+    is_default: number;
+  }[];
+
+  const today = todayISO();
+
+  return accounts.map((a) => {
+    const cp = db!.prepare(
+      `SELECT amount, date(date) AS d, created_at AS ca
+       FROM balance_history
+       WHERE account_id = ? AND date(date) <= date(?)
+       ORDER BY date(date) DESC, created_at DESC LIMIT 1`
+    ).get(a.id, today) as { amount: number; d: string; ca: string } | undefined;
+
+    const baseDate = cp?.d ?? '0000-01-01';
+    const baseCreated = cp?.ca ?? '';
+
+    const deposits = db!.prepare(
+      `SELECT COALESCE(SUM(amount), 0) s FROM deposits
+       WHERE account_id = ?
+         AND (date(date) > ? OR (date(date) = ? AND created_at > ?))`
+    ).get(a.id, baseDate, baseDate, baseCreated) as { s: number };
+
+    const expenses = db!.prepare(
+      `SELECT COALESCE(SUM(amount), 0) s FROM expenses
+       WHERE account_id = ?
+         AND (date(date) > ? OR (date(date) = ? AND created_at > ?))`
+    ).get(a.id, baseDate, baseDate, baseCreated) as { s: number };
+
+    const out = db!.prepare(
+      `SELECT COALESCE(SUM(amount), 0) s FROM transfers
+       WHERE from_account_id = ? AND date(date) > ?`
+    ).get(a.id, baseDate) as { s: number };
+
+    const incoming = db!.prepare(
+      `SELECT COALESCE(SUM(amount), 0) s FROM transfers
+       WHERE to_account_id = ? AND date(date) > ?`
+    ).get(a.id, baseDate) as { s: number };
+
+    return {
+      ...a,
+      balance: (cp?.amount ?? 0) + deposits.s - expenses.s - out.s + incoming.s,
+      base: cp?.amount ?? 0,
+      baseDate: cp?.d ?? null,
+    };
+  });
+});
+
+ipcMain.handle('db:addAccount', (_, p: { name: string; kind?: string; color?: string | null }) => {
+  const clean = (p.name || '').trim().replace(/\s+/g, ' ');
+  if (!clean) throw new Error('Название счёта не может быть пустым');
+  const all = db!.prepare('SELECT id, name FROM accounts').all() as { id: number; name: string }[];
+  if (all.some((a) => a.name.trim().toLowerCase() === clean.toLowerCase())) {
+    throw new Error(`Счёт «${clean}» уже есть`);
+  }
+  const order = (
+    db!.prepare('SELECT COALESCE(MAX(sort_order), 0) + 1 n FROM accounts').get() as { n: number }
+  ).n;
+  const res = db!.prepare(
+    'INSERT INTO accounts (name, kind, color, sort_order) VALUES (?, ?, ?, ?)'
+  ).run(clean, p.kind === 'cash' ? 'cash' : 'card', p.color || null, order);
+  return { id: Number(res.lastInsertRowid), name: clean };
+});
+
+ipcMain.handle('db:renameAccount', (_, id: number, name: string) => {
+  const clean = cleanRenameName(name);
+  const row = db!.prepare('SELECT name FROM accounts WHERE id = ?').get(id) as
+    | { name: string }
+    | undefined;
+  if (!row) throw new Error('Счёт не найден');
+  if (row.name === clean) return { success: true };
+  assertUniqueName('SELECT name FROM accounts WHERE id <> ?', [id], clean);
+  db!.prepare('UPDATE accounts SET name = ? WHERE id = ?').run(clean, id);
+  return { success: true };
+});
+
+ipcMain.handle('db:setAccountColor', (_, id: number, color: string | null) => {
+  db!.prepare('UPDATE accounts SET color = ? WHERE id = ?').run(color || null, id);
+  return { success: true };
+});
+
+/**
+ * Удаление счёта.
+ *
+ * Историю не удаляем: операции и переводы переезжают на счёт по умолчанию.
+ * Терять деньги из-за того, что счёт закрыли, нельзя — то же правило, что и
+ * у категорий трат.
+ */
+ipcMain.handle('db:deleteAccount', (_, id: number) => {
+  const row = db!.prepare('SELECT name, is_default FROM accounts WHERE id = ?').get(id) as
+    | { name: string; is_default: number }
+    | undefined;
+  if (!row) throw new Error('Счёт не найден');
+  if (row.is_default === 1) throw new Error('Счёт по умолчанию удалить нельзя');
+
+  const fallback = db!.prepare('SELECT id FROM accounts WHERE is_default = 1').get() as
+    | { id: number }
+    | undefined;
+  if (!fallback) throw new Error('Нет счёта, на который можно перенести операции');
+
+  const run = db!.transaction(() => {
+    // Переводы, которые после переноса стали бы «сам в себя», убираем ЗАРАНЕЕ,
+    // до UPDATE'ов: SQLite проверяет CHECK построчно и на самом обновлении
+    // отклонил бы строку раньше, чем доедет следующий DELETE. Такие переводы
+    // и так пустые — деньги сходили туда и обратно.
+    db!.prepare(
+      `DELETE FROM transfers
+       WHERE (from_account_id = ? AND to_account_id = ?)
+          OR (to_account_id = ? AND from_account_id = ?)`
+    ).run(id, fallback.id, id, fallback.id);
+
+    db!.prepare('UPDATE expenses SET account_id = ? WHERE account_id = ?').run(fallback.id, id);
+    db!.prepare('UPDATE deposits SET account_id = ? WHERE account_id = ?').run(fallback.id, id);
+    db!.prepare('UPDATE balance_history SET account_id = ? WHERE account_id = ?').run(fallback.id, id);
+    db!.prepare('UPDATE transfers SET from_account_id = ? WHERE from_account_id = ?').run(
+      fallback.id,
+      id
+    );
+    db!.prepare('UPDATE transfers SET to_account_id = ? WHERE to_account_id = ?').run(fallback.id, id);
+    db!.prepare('DELETE FROM accounts WHERE id = ?').run(id);
+  });
+  run();
+  return { success: true };
+});
+
+ipcMain.handle('db:getTransfers', (_, range: { startDate: string; endDate: string }) => {
+  return db!.prepare(
+    `SELECT t.*, f.name AS from_name, f.color AS from_color,
+            t2.name AS to_name, t2.color AS to_color
+     FROM transfers t
+     JOIN accounts f ON f.id = t.from_account_id
+     JOIN accounts t2 ON t2.id = t.to_account_id
+     WHERE date(t.date) BETWEEN date(?) AND date(?)
+     ORDER BY date(t.date) DESC, t.created_at DESC`
+  ).all(range.startDate, range.endDate);
+});
+
+/**
+ * Перевод между своими счетами.
+ *
+ * На общий остаток не влияет, поэтому и в totalDeposits/totalExpenses его не
+ * включаем: иначе снятие наличных посчиталось бы расходом. Проверка
+ * от_к_кому <> от_к_кому стоит ещё и в БД, чтобы счёт-сам-в-себя прошёл
+ * мимо интерфейса не мог.
+ */
+ipcMain.handle(
+  'db:addTransfer',
+  (
+    _,
+    p: { fromAccountId: number; toAccountId: number; amount: number; date: string; note?: string }
+  ) => {
+    const from = Number(p.fromAccountId);
+    const to = Number(p.toAccountId);
+    const amount = Number(p.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Сумма перевода должна быть больше нуля');
+    }
+    if (from === to) throw new Error('Нельзя перевести деньги на тот же счёт');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date || '')) throw new Error('Некорректная дата');
+    for (const [label, accId] of [
+      ['откуда', from],
+      ['куда', to],
+    ] as const) {
+      const acc = db!.prepare('SELECT id FROM accounts WHERE id = ?').get(accId);
+      if (!acc) throw new Error(`Счёт (${label}) не найден`);
+    }
+    const res = db!.prepare(
+      `INSERT INTO transfers (from_account_id, to_account_id, amount, date, note)
+       VALUES (?, ?, ?, ?, ?)`
+    ).run(from, to, amount, p.date, (p.note || '').trim() || null);
+    return { id: Number(res.lastInsertRowid) };
+  }
+);
+
+ipcMain.handle('db:deleteTransfer', (_, id: number) => {
+  db!.prepare('DELETE FROM transfers WHERE id = ?').run(id);
+  return { success: true };
 });
 
 // ——— Займы ———

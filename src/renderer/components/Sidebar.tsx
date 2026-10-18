@@ -7,8 +7,12 @@ import {
   Plus,
   Trash2,
   ChevronDown,
+  Pencil,
+  X,
+  Check,
+  ArrowLeftRight,
 } from 'lucide-react';
-import type { Category, Subcategory, Subitem, RecurringItem } from '../types';
+import type { Category, Subcategory, Subitem, RecurringItem, AccountBalance } from '../types';
 import { RecurringBlock } from './Recurring';
 import { formatMoney } from '../lib/format';
 import { getCategoryIcon as getCategoryIconDef } from '../lib/icons';
@@ -34,6 +38,15 @@ interface SidebarProps {
   recurringMonthly: number;
   onPayRecurring: (id: number) => void;
   onOpenRecurringManager: () => void;
+  /** Счета с их остатками: сумма по всем и есть общий остаток */
+  accounts: AccountBalance[];
+  /** Выбранный счёт; null — показываем все */
+  selectedAccountId: number | null;
+  onSelectAccount: (id: number | null) => void;
+  onAddAccount: (name: string) => Promise<void>;
+  onRenameAccount: (id: number, name: string) => Promise<void>;
+  onDeleteAccount: (id: number) => void;
+  onOpenTransfer: () => void;
 }
 
 const WIDTH_KEY = 'traty-sidebar-width';
@@ -79,7 +92,18 @@ export default function Sidebar({
   recurringMonthly,
   onPayRecurring,
   onOpenRecurringManager,
+  accounts,
+  selectedAccountId,
+  onSelectAccount,
+  onAddAccount,
+  onRenameAccount,
+  onDeleteAccount,
+  onOpenTransfer,
 }: SidebarProps) {
+  const [newAccountOpen, setNewAccountOpen] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
+  const [editingAccount, setEditingAccount] = useState<number | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   // Раскрытая категория: плитка → выезжающий список её подкатегорий
   const [openId, setOpenId] = useState<number | null>(null);
   const [width, setWidth] = useState<number>(() => {
@@ -366,6 +390,154 @@ export default function Sidebar({
               <>отметки не заданы — учитываются все операции</>
             )}
           </div>
+        </div>
+
+        {/* Счета. Их сумма и есть «текущий остаток» выше: карточки показывают,
+            из чего он складывается, и позволяют уйти в один счёт. */}
+        <div className="account-list">
+          <div className="account-list-head">
+            <span>Счета</span>
+            <div className="account-list-actions">
+              <button
+                className="account-add-btn"
+                onClick={() => setNewAccountOpen((v) => !v)}
+                title="Добавить счёт"
+                aria-label="Добавить счёт"
+              >
+                <Plus size={14} />
+              </button>
+              <button
+                className="account-add-btn"
+                onClick={onOpenTransfer}
+                title="Перевод между счетами"
+                aria-label="Перевод между счетами"
+              >
+                <ArrowLeftRight size={14} />
+              </button>
+            </div>
+          </div>
+
+          {newAccountOpen && (
+            <form
+              className="account-new"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const name = newAccountName.trim();
+                if (!name) return;
+                try {
+                  await onAddAccount(name);
+                  setNewAccountName('');
+                  setNewAccountOpen(false);
+                } catch {
+                  /* ошибку покажет тост в App.tsx */
+                }
+              }}
+            >
+              <input
+                autoFocus
+                value={newAccountName}
+                placeholder="Название счёта…"
+                maxLength={60}
+                onChange={(e) => setNewAccountName(e.target.value)}
+              />
+              <button type="submit" className="btn btn-secondary" disabled={!newAccountName.trim()}>
+                <Plus size={12} />
+              </button>
+              <button type="button" className="btn btn-ghost" onClick={() => setNewAccountOpen(false)}>
+                <X size={13} />
+              </button>
+            </form>
+          )}
+
+          <button
+            className={`account-row account-row-all ${selectedAccountId === null ? 'active' : ''}`}
+            onClick={() => onSelectAccount(null)}
+          >
+            <span className="account-row-name">Все счета</span>
+            <span className="account-row-sum">
+              {formatMoney(accounts.reduce((s, a) => s + a.balance, 0))}
+            </span>
+          </button>
+
+          {accounts.map((a) => (
+            <div key={a.id} className={`account-row ${selectedAccountId === a.id ? 'active' : ''}`}>
+              <button
+                className="account-row-main"
+                onClick={() => onSelectAccount(selectedAccountId === a.id ? null : a.id)}
+                title={`${a.name}: ${formatMoney(a.balance)}`}
+              >
+                <span
+                  className="account-dot"
+                  style={{ background: a.color || 'var(--accent-primary)' }}
+                />
+                <span className="account-row-name">{a.name}</span>
+                {a.is_default === 1 && <span className="account-default-badge">осн.</span>}
+              </button>
+              <span
+                className="account-row-sum"
+                style={{ color: a.balance < 0 ? 'var(--accent-danger)' : undefined }}
+              >
+                {formatMoney(a.balance)}
+              </span>
+              {editingAccount === a.id ? (
+                <form
+                  className="account-rename"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const draft = renameDraft.trim();
+                    if (!draft) return;
+                    try {
+                      await onRenameAccount(a.id, draft);
+                      setEditingAccount(null);
+                    } catch {
+                      /* тост */
+                    }
+                  }}
+                >
+                  <input
+                    className="rename-input"
+                    style={{ fontSize: 12 }}
+                    autoFocus
+                    value={renameDraft}
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setEditingAccount(null);
+                    }}
+                  />
+                  <button type="submit" className="action-btn" aria-label="Сохранить">
+                    <Check size={12} color="var(--accent-success)" />
+                  </button>
+                  <button type="button" className="action-btn" onClick={() => setEditingAccount(null)} aria-label="Отмена">
+                    <X size={12} />
+                  </button>
+                </form>
+              ) : (
+                <div className="account-row-actions">
+                  <button
+                    className="action-btn"
+                    onClick={() => {
+                      setRenameDraft(a.name);
+                      setEditingAccount(a.id);
+                    }}
+                    title="Переименовать счёт"
+                    aria-label={`Переименовать счёт ${a.name}`}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  {a.is_default !== 1 && (
+                    <button
+                      className="action-btn"
+                      onClick={() => onDeleteAccount(a.id)}
+                      title="Удалить счёт. Операции перейдут на основной."
+                      aria-label={`Удалить счёт ${a.name}`}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </aside>

@@ -189,6 +189,46 @@ export const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_recurring_income_next
     ON recurring_income(is_active, next_date);
+
+  -- Счёт: наличные, карта, вклад, кошелёк.
+  --
+  -- Денег может быть в нескольких местах сразу, и общий остаток — это их
+  -- сумма. Сами операции не меняются от появления счетов: у каждой просто
+  -- появляется пометка, чьи это деньги.
+  CREATE TABLE IF NOT EXISTS accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    -- Вид счёта: наличные или безнал. Влияет только на подсказку в форме.
+    kind TEXT NOT NULL DEFAULT 'card',
+    color TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Перевод между своими счетами: с карты на наличные и обратно.
+  --
+  -- Это НЕ трата и НЕ доход — деньги те же самые, место другое. Поэтому
+  -- перевод живёт отдельной таблицей и не попадает ни в один из отчётов:
+  -- иначе снятие наличных выглядело бы расходом на 20 000, а внесение
+  -- наличных — доходом, и сумма за месяц раздувалась вдвое.
+  --
+  -- На общий остаток перевод не влияет: из одного счёта уходит, в другой
+  -- приходит, в сумме ноль. А вот покомпонентно каждый счёт меняется.
+  CREATE TABLE IF NOT EXISTS transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_account_id INTEGER NOT NULL,
+    to_account_id INTEGER NOT NULL,
+    amount REAL NOT NULL CHECK (amount > 0),
+    date TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (from_account_id) REFERENCES accounts(id),
+    FOREIGN KEY (to_account_id) REFERENCES accounts(id),
+    CHECK (from_account_id <> to_account_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(date);
 `;
 
 export const DEFAULT_CATEGORIES: { name: string; type: string; sortOrder: number }[] = [
@@ -252,6 +292,63 @@ export interface DepositNoteMigrationResult {
   depositsLinked: number;
   /** Сколько внесений было с одинаковым комментарием и слилось в одну категорию */
   depositsMerged: number;
+}
+
+/**
+ * Добавляет счета и привязывает к ним существующие операции.
+ *
+ * Всё, что заведено до 1.0.23, автоматически попадает на счёт по умолчанию:
+ * иначе суммы за старые месяцы выпали бы из остатка, потому что фильтр по
+ * счёту не нашёл бы ни одной записи. Миграция идемпотентна: при следующем
+ * запуске все колонки на месте и счёт по умолчанию уже создан.
+ */
+export function migrateAccounts(database: Database): boolean {
+  let changed = false;
+
+  for (const table of ['expenses', 'deposits', 'balance_history']) {
+    const cols = database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'account_id')) {
+      database.exec(`ALTER TABLE ${table} ADD COLUMN account_id INTEGER`);
+      console.log(`[schema] Добавлена колонка ${table}.account_id`);
+      changed = true;
+    }
+  }
+
+  const hasDefault = database.prepare('SELECT id FROM accounts WHERE is_default = 1').get() as
+    | { id: number }
+    | undefined;
+  let accountId: number;
+  if (hasDefault) {
+    accountId = hasDefault.id;
+  } else {
+    database.exec(`
+      INSERT INTO accounts (name, kind, sort_order, is_default)
+      VALUES ('Основной счёт', 'card', 0, 1)
+    `);
+    accountId = (
+      database.prepare('SELECT id FROM accounts WHERE is_default = 1').get() as { id: number }
+    ).id;
+    console.log('[schema] Создан счёт по умолчанию «Основной счёт»');
+    changed = true;
+  }
+
+  // Перевешиваем только те записи, что ещё ни к какому счёту не привязаны.
+  for (const table of ['expenses', 'deposits', 'balance_history']) {
+    const orphan = database
+      .prepare(`SELECT COUNT(*) c FROM ${table} WHERE account_id IS NULL`)
+      .get() as { c: number };
+    if (orphan.c > 0) {
+      database.prepare(`UPDATE ${table} SET account_id = ? WHERE account_id IS NULL`).run(accountId);
+      console.log(`[schema] ${table}: ${orphan.c} записей привязано к счёту по умолчанию`);
+      changed = true;
+    }
+  }
+
+  database.exec(`
+    CREATE INDEX IF NOT EXISTS idx_expenses_account ON expenses(account_id);
+    CREATE INDEX IF NOT EXISTS idx_deposits_account ON deposits(account_id);
+  `);
+  return changed;
 }
 
 /**
@@ -437,6 +534,7 @@ export function applySchema(database: Database): void {
   // Пересоздаёт expenses, поэтому идёт сразу: всё, что дальше работает с этой
   // таблицей, уже видит nullable category_id.
   migrateExpensesNullableCategory(database);
+  migrateAccounts(database);
 
   // Миграция: уникальность подкатегорий внутри категории.
   // Без этого повторные запуски дублируют дефолтные подкатегории,

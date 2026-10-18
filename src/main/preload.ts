@@ -27,7 +27,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDeleteImpact: (kind: 'category' | 'subcategory', id: number) =>
     ipcRenderer.invoke('db:getDeleteImpact', kind, id),
   
-  getExpenses: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getExpenses', { startDate, endDate }),
+  getExpenses: (startDate: string, endDate: string, accountId?: number | null) =>
+    ipcRenderer.invoke('db:getExpenses', { startDate, endDate, accountId }),
   addExpense: (expense: { categoryId: number; subcategoryId?: number; amount: number; date: string; note?: string }) => 
     ipcRenderer.invoke('db:addExpense', expense),
   deleteExpense: (id: number) => ipcRenderer.invoke('db:deleteExpense', id),
@@ -52,7 +53,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('db:addBalance', balance),
   deleteBalance: (id: number) => ipcRenderer.invoke('db:deleteBalance', id),
 
-  getDeposits: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getDeposits', { startDate, endDate }),
+  getDeposits: (startDate: string, endDate: string, accountId?: number | null) =>
+    ipcRenderer.invoke('db:getDeposits', { startDate, endDate, accountId }),
   addDeposit: (deposit: { amount: number; date: string; categoryId: number }) =>
     ipcRenderer.invoke('db:addDeposit', deposit),
   deleteDeposit: (id: number) => ipcRenderer.invoke('db:deleteDeposit', id),
@@ -63,6 +65,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setDepositCategoryColor: (id: number, color: string | null) =>
     ipcRenderer.invoke('db:setDepositCategoryColor', id, color),
   exportReportXlsx: (payload: any) => ipcRenderer.invoke('report:exportXlsx', payload),
+
+  // Счета и перемещения между ними
+  getAccountBalances: () => ipcRenderer.invoke('db:getAccountBalances'),
+  addAccount: (account: { name: string; kind?: string; color?: string | null }) =>
+    ipcRenderer.invoke('db:addAccount', account),
+  renameAccount: (id: number, name: string) => ipcRenderer.invoke('db:renameAccount', id, name),
+  setAccountColor: (id: number, color: string | null) =>
+    ipcRenderer.invoke('db:setAccountColor', id, color),
+  deleteAccount: (id: number) => ipcRenderer.invoke('db:deleteAccount', id),
+  getTransfers: (range: { startDate: string; endDate: string }) =>
+    ipcRenderer.invoke('db:getTransfers', range),
+  addTransfer: (transfer: {
+    fromAccountId: number;
+    toAccountId: number;
+    amount: number;
+    date: string;
+    note?: string;
+  }) => ipcRenderer.invoke('db:addTransfer', transfer),
+  deleteTransfer: (id: number) => ipcRenderer.invoke('db:deleteTransfer', id),
 
   // Займы: деньги пришли и ушли, но ни доходом, ни расходом не являются
   getLoans: () => ipcRenderer.invoke('db:getLoans'),
