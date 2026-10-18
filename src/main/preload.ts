@@ -44,7 +44,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateRecurring: (id: number, patch: unknown) =>
     ipcRenderer.invoke('db:updateRecurring', id, patch),
   deleteRecurring: (id: number) => ipcRenderer.invoke('db:deleteRecurring', id),
-  payRecurring: (id: number) => ipcRenderer.invoke('db:payRecurring', id),
+  payRecurring: (id: number, accountId?: number) =>
+    ipcRenderer.invoke('db:payRecurring', id, accountId),
   getRecurringMonthlyTotal: () => ipcRenderer.invoke('db:getRecurringMonthlyTotal'),
   
   getBalanceHistory: () => ipcRenderer.invoke('db:getBalanceHistory'),
@@ -94,10 +95,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     dateTaken: string;
     dateDue: string;
     depositCategoryId?: number;
+    accountId?: number;
     note?: string;
   }) => ipcRenderer.invoke('db:addLoan', loan),
-  repayLoan: (loan: { id: number; amount: number; categoryId: number; date: string }) =>
-    ipcRenderer.invoke('db:repayLoan', loan),
+  repayLoan: (loan: {
+    id: number;
+    amount: number;
+    categoryId: number;
+    date: string;
+    accountId?: number;
+  }) => ipcRenderer.invoke('db:repayLoan', loan),
   deleteLoan: (id: number) => ipcRenderer.invoke('db:deleteLoan', id),
 
   // Регулярные внесения: выплаты агрегаторов с удержанием процента
@@ -122,7 +129,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('db:updateRecurringIncome', item),
   toggleRecurringIncome: (id: number) => ipcRenderer.invoke('db:toggleRecurringIncome', id),
   deleteRecurringIncome: (id: number) => ipcRenderer.invoke('db:deleteRecurringIncome', id),
-  receiveRecurringIncome: (id: number) => ipcRenderer.invoke('db:receiveRecurringIncome', id),
+  receiveRecurringIncome: (id: number, accountId?: number) =>
+    ipcRenderer.invoke('db:receiveRecurringIncome', id, accountId),
   getRecurringIncomeMonthlyTotal: () => ipcRenderer.invoke('db:getRecurringIncomeMonthlyTotal'),
   
   getReport: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getReport', { startDate, endDate }),

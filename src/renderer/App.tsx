@@ -871,7 +871,7 @@ useEffect(() => {
  */
 const handlePayRecurring = async (id: number) => {
     try {
-      const result = await window.electronAPI.payRecurring(id);
+      const result = await window.electronAPI.payRecurring(id, selectedAccountId ?? undefined);
       if (!result.success) {
         addToast(result.message || 'Не удалось отметить платёж', 'error');
         return;
@@ -944,8 +944,11 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
     depositCategoryId?: number;
     note?: string;
   }) => {
-    const res = await window.electronAPI.addLoan(payload);
-    await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances()]);
+    const res = await window.electronAPI.addLoan({
+      ...payload,
+      accountId: selectedAccountId ?? undefined,
+    });
+    await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances(), loadAccounts()]);
     addToast(
       res.recordedDeposit
         ? `Заём заведён, деньги записаны как поступление`
@@ -960,8 +963,11 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
     categoryId: number;
     date: string;
   }) => {
-    const res = await window.electronAPI.repayLoan(payload);
-    await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances()]);
+    const res = await window.electronAPI.repayLoan({
+      ...payload,
+      accountId: selectedAccountId ?? undefined,
+    });
+    await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances(), loadAccounts()]);
     addToast(
       res.remaining > 0.001
         ? `Возврат записан, осталось ${formatMoney(res.remaining)}`
@@ -1012,8 +1018,11 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
   /** Отметка выплаты: сервер создаёт внесение на дату выплаты и двигает дату */
   const handleReceiveIncome = async (id: number) => {
     try {
-      const res = await window.electronAPI.receiveRecurringIncome(id);
-      await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances()]);
+      const res = await window.electronAPI.receiveRecurringIncome(
+        id,
+        selectedAccountId ?? undefined
+      );
+      await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances(), loadAccounts()]);
       const when = new Date(res.date).toLocaleDateString('ru-RU', {
         day: '2-digit',
         month: '2-digit',

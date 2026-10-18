@@ -797,6 +797,7 @@ interface RestorableExpense {
   date: string;
   note: string | null;
   created_at: string;
+  account_id?: number | null;
 }
 
 /** Внесение целиком — нужно для возврата удалённой записи */
@@ -807,6 +808,7 @@ interface RestorableDeposit {
   category_id: number | null;
   note: string | null;
   created_at: string;
+  account_id?: number | null;
 }
 
 /**
@@ -834,9 +836,14 @@ ipcMain.handle('db:restoreExpense', (_, expense: RestorableExpense) => {
     categoryId = fallback.id;
   }
 
+  // Счёт восстанавливаем обязательно: остаток считается по счетам, и запись
+  // без счёта в него не попала бы. Отмена удаления молча уводила бы трату из
+  // суммы, пока деньги висели бы в таблице.
+  const accountId = resolveAccount(expense.account_id);
+
   db!.prepare(
-    `INSERT INTO expenses (id, category_id, subcategory_id, subitem_id, amount, date, note, created_at)
-     VALUES (@id, @category_id, @subcategory_id, @subitem_id, @amount, @date, @note, @created_at)`
+    `INSERT INTO expenses (id, category_id, subcategory_id, subitem_id, amount, date, note, created_at, account_id)
+     VALUES (@id, @category_id, @subcategory_id, @subitem_id, @amount, @date, @note, @created_at, @account_id)`
   ).run({
     id: expense.id,
     category_id: categoryId,
@@ -848,6 +855,7 @@ ipcMain.handle('db:restoreExpense', (_, expense: RestorableExpense) => {
     date: expense.date,
     note: expense.note ?? null,
     created_at: expense.created_at,
+    account_id: accountId,
   });
   return { success: true };
 });
@@ -870,44 +878,53 @@ function getDerivedBalanceAt(dateStr: string): {
   base: number;
   baseDate: string | null;
 } {
-  const row = db!.prepare(`
-    WITH cp AS (
-      SELECT amount, date(date) AS d, created_at AS ca
-      FROM balance_history
-      WHERE date(date) <= date(?)
-      ORDER BY date(date) DESC, created_at DESC
-      LIMIT 1
-    )
-    SELECT
-      COALESCE((SELECT amount FROM cp), 0)
-        + COALESCE((SELECT SUM(amount) FROM deposits
-            WHERE (
-                    date(date) > COALESCE((SELECT d FROM cp), '0000-01-01')
-                 OR (date(date) = COALESCE((SELECT d FROM cp), '0000-01-01')
-                     AND created_at > COALESCE((SELECT ca FROM cp), ''))
-                  )
-              AND date(date) <= date(?)), 0)
-        - COALESCE((SELECT SUM(amount) FROM expenses
-            WHERE (
-                    date(date) > COALESCE((SELECT d FROM cp), '0000-01-01')
-                 OR (date(date) = COALESCE((SELECT d FROM cp), '0000-01-01')
-                     AND created_at > COALESCE((SELECT ca FROM cp), ''))
-                  )
-              AND date(date) <= date(?)), 0)
-      AS balance,
-      COALESCE((SELECT amount FROM cp), 0) AS base,
-      (SELECT d FROM cp) AS base_date
-  `).get(dateStr, dateStr, dateStr) as {
-    balance: number;
-    base: number;
-    base_date: string | null;
-  };
+  const accounts = db!.prepare('SELECT id FROM accounts ORDER BY id').all() as { id: number }[];
 
-  return {
-    balance: row.balance ?? 0,
-    base: row.base ?? 0,
-    baseDate: row.base_date ?? null,
-  };
+  // Считаем по каждому счёту отдельно и складываем. Отметка «Указать остаток»
+  // принадлежит счёту, а не всей базе: отметка от 1-го на «Карте» не должна
+  // обнулять внесение от 5-го на «Наличных». Общая отметка на все счета —
+  // это разные деньги, смешанные в одну сумму, и такой расчёт их терял.
+  const cpStmt = db!.prepare(`
+    SELECT amount, date(date) AS d, created_at AS ca
+    FROM balance_history
+    WHERE account_id = ? AND date(date) <= date(?)
+    ORDER BY date(date) DESC, created_at DESC
+    LIMIT 1
+  `);
+  const depStmt = db!.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS s FROM deposits
+    WHERE account_id = ?
+      AND (date(date) > ? OR (date(date) = ? AND created_at > ?))
+      AND date(date) <= date(?)
+  `);
+  const expStmt = db!.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS s FROM expenses
+    WHERE account_id = ?
+      AND (date(date) > ? OR (date(date) = ? AND created_at > ?))
+      AND date(date) <= date(?)
+  `);
+
+  let balance = 0;
+  let base = 0;
+  let baseDate: string | null = null;
+
+  for (const acc of accounts) {
+    const cp = cpStmt.get(acc.id, dateStr) as
+      | { amount: number; d: string; ca: string }
+      | undefined;
+    const cpDate = cp?.d ?? '0000-01-01';
+    const cpCreated = cp?.ca ?? '';
+
+    const dep = depStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
+    const exp = expStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
+
+    balance += (cp?.amount ?? 0) + dep.s - exp.s;
+    base += cp?.amount ?? 0;
+    // Для подсказки под остатком показываем самую свежую отметку из всех
+    if (cp && (baseDate === null || cp.d > baseDate)) baseDate = cp.d;
+  }
+
+  return { balance, base, baseDate };
 }
 
 ipcMain.handle('db:getBalanceHistory', () => {
@@ -1083,9 +1100,12 @@ ipcMain.handle('db:restoreDeposit', (_, deposit: RestorableDeposit) => {
     if (!stillThere) categoryId = null;
   }
 
+  // Счёт тоже восстанавливаем: без него внесение не попало бы в остаток.
+  const accountId = resolveAccount(deposit.account_id);
+
   db!.prepare(
-    `INSERT INTO deposits (id, amount, date, category_id, note, created_at)
-     VALUES (@id, @amount, @date, @category_id, @note, @created_at)`
+    `INSERT INTO deposits (id, amount, date, category_id, note, created_at, account_id)
+     VALUES (@id, @amount, @date, @category_id, @note, @created_at, @account_id)`
   ).run({
     id: deposit.id,
     amount: deposit.amount,
@@ -1093,6 +1113,7 @@ ipcMain.handle('db:restoreDeposit', (_, deposit: RestorableDeposit) => {
     category_id: categoryId,
     note: deposit.note ?? null,
     created_at: deposit.created_at,
+    account_id: accountId,
   });
   return { success: true };
 });
@@ -1648,7 +1669,7 @@ ipcMain.handle('db:deleteRecurring', (_, id: number) => {
  * Обе операции идут в одной транзакции. Иначе при сбое между ними получилось
  * бы либо потерянное внесение, либо платёж, который никогда не спишется.
  */
-ipcMain.handle('db:payRecurring', (_, id: number) => {
+ipcMain.handle('db:payRecurring', (_, id: number, accountId?: number) => {
   const today = todayISO();
   const row = db!.prepare('SELECT * FROM recurring WHERE id = ?').get(id) as
     | (RecurringRow & { next_date: string })
@@ -1664,15 +1685,19 @@ ipcMain.handle('db:payRecurring', (_, id: number) => {
 
   const pay = db!.transaction(() => {
     db!.prepare(
-      `INSERT INTO expenses (category_id, subcategory_id, subitem_id, amount, date, note)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO expenses (category_id, subcategory_id, subitem_id, amount, date, note, account_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(
       row.category_id,
       row.subcategory_id,
       row.subitem_id,
       row.amount,
       expenseDate,
-      row.title
+      row.title,
+      // Регулярный платёж не хранит свой счёт: пока их был один, спрашивать
+      // было не о чем. Берём тот, что выбран в боковой панели, иначе основной.
+      // Трата без счёта не попала бы в остаток вовсе.
+      resolveAccount(accountId)
     );
     db!.prepare('UPDATE recurring SET next_date = ? WHERE id = ?').run(nextDate, id);
   });
@@ -1961,6 +1986,7 @@ ipcMain.handle(
       dateTaken: string;
       dateDue: string;
       depositCategoryId?: number;
+      accountId?: number;
       note?: string;
     }
   ) => {
@@ -2006,8 +2032,9 @@ ipcMain.handle(
 
       if (categoryName) {
         db!.prepare(
-          `INSERT INTO deposits (amount, date, category_id, loan_id) VALUES (?, ?, ?, ?)`
-        ).run(amount, p.dateTaken, catId, loanId);
+          `INSERT INTO deposits (amount, date, category_id, loan_id, account_id)
+           VALUES (?, ?, ?, ?, ?)`
+        ).run(amount, p.dateTaken, catId, loanId, resolveAccount(p.accountId));
       }
     });
     run();
@@ -2019,7 +2046,10 @@ ipcMain.handle(
 /** Возврат части или всей суммы: создаёт трату с пометкой loan_id */
 ipcMain.handle(
   'db:repayLoan',
-  (_, p: { id: number; amount: number; categoryId: number; date: string }) => {
+  (
+    _,
+    p: { id: number; amount: number; categoryId: number; date: string; accountId?: number }
+  ) => {
     const amount = Number(p.amount);
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new Error('Сумма возврата должна быть больше нуля');
@@ -2036,8 +2066,9 @@ ipcMain.handle(
 
     const run = db!.transaction(() => {
       db!.prepare(
-        `INSERT INTO expenses (category_id, amount, date, note, loan_id) VALUES (?, ?, ?, ?, ?)`
-      ).run(catId, amount, p.date, `Возврат: ${row.title}`, p.id);
+        `INSERT INTO expenses (category_id, amount, date, note, loan_id, account_id)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(catId, amount, p.date, `Возврат: ${row.title}`, p.id, resolveAccount(p.accountId));
     });
     run();
 
@@ -2210,7 +2241,7 @@ ipcMain.handle('db:deleteRecurringIncome', (_, id: number) => {
  * Дата сразу сдвигается до будущего: пропущенные выплаты не копятся,
  * одна отметка закрывает всю задолженность, как и у регулярных платежей.
  */
-ipcMain.handle('db:receiveRecurringIncome', (_, id: number) => {
+ipcMain.handle('db:receiveRecurringIncome', (_, id: number, accountId?: number) => {
   const row = db!.prepare(`${RECURRING_INCOME_SELECT} WHERE r.id = ?`).get(id) as
     | RecurringIncomeRow
     | undefined;
@@ -2221,8 +2252,8 @@ ipcMain.handle('db:receiveRecurringIncome', (_, id: number) => {
 
   const run = db!.transaction(() => {
     db!.prepare(
-      `INSERT INTO deposits (amount, date, category_id, note) VALUES (?, ?, ?, ?)`
-    ).run(net, row.next_date, row.category_id, row.title);
+      `INSERT INTO deposits (amount, date, category_id, note, account_id) VALUES (?, ?, ?, ?, ?)`
+    ).run(net, row.next_date, row.category_id, row.title, resolveAccount(accountId));
     db!.prepare('UPDATE recurring_income SET next_date = ? WHERE id = ?').run(nextDate, id);
   });
   run();

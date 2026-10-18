@@ -126,7 +126,7 @@ export interface ElectronAPI {
   ): Promise<{ success: boolean; message?: string }>;
   deleteRecurring(id: number): Promise<{ success: boolean }>;
   /** Создаёт трату и сдвигает платёж на следующий период */
-  payRecurring(id: number): Promise<{
+  payRecurring(id: number, accountId?: number): Promise<{
     success: boolean;
     message?: string;
     nextDate?: string;
@@ -192,9 +192,16 @@ export interface ElectronAPI {
     dateTaken: string;
     dateDue: string;
     depositCategoryId?: number;
+    accountId?: number;
     note?: string;
   }): Promise<{ success: boolean; id: number; recordedDeposit: boolean }>;
-  repayLoan(loan: { id: number; amount: number; categoryId: number; date: string }): Promise<{
+  repayLoan(loan: {
+    id: number;
+    amount: number;
+    categoryId: number;
+    date: string;
+    accountId?: number;
+  }): Promise<{
     success: boolean;
     remaining: number;
   }>;
@@ -227,7 +234,7 @@ export interface ElectronAPI {
   }): Promise<{ success: boolean; net: number }>;
   toggleRecurringIncome(id: number): Promise<{ success: boolean }>;
   deleteRecurringIncome(id: number): Promise<{ success: boolean }>;
-  receiveRecurringIncome(id: number): Promise<{
+  receiveRecurringIncome(id: number, accountId?: number): Promise<{
     success: boolean;
     net: number;
     date: string;
