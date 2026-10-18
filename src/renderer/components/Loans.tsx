@@ -32,6 +32,96 @@ function pluralDays(n: number): string {
   return `${n} дней`;
 }
 
+/**
+ * Отметка выплаты полученной — с фактической суммой.
+ *
+ * У агрегаторов сумма каждую неделю разная, поэтому считать только от настройки
+ * нельзя: в остаток попало бы расчётное число вместо реального. Поле
+ * предзаполняется расчётом, но правится свободно, и введённое становится
+ * записанным внесением.
+ */
+function ReceiveDialog({
+  title,
+  calculated,
+  commission,
+  onClose,
+  onConfirm,
+}: {
+  title: string;
+  calculated: number;
+  commission: number;
+  onClose: () => void;
+  onConfirm: (amount: number) => void;
+}) {
+  const [amount, setAmount] = useState(String(calculated));
+  const num = Number(amount.replace(',', '.'));
+  const valid = Number.isFinite(num) && num > 0;
+  // Разность берём от расчётного к введённому, а не наоборот: положительное
+  // значение должно означать «пришло больше ожидаемого». Обратный порядок дал
+  // бы подпись «больше» в случае, когда пришло меньше.
+  const diff = valid ? Math.round((num - calculated) * 100) / 100 : 0;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Выплата получена</h2>
+          <button className="modal-close" onClick={onClose} aria-label="Закрыть">
+            <X size={20} />
+          </button>
+        </div>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (valid) onConfirm(num);
+          }}
+        >
+          <div className="form-group">
+            <label className="form-label">Куда пришло</label>
+            <div className="mv-title">{title}</div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="receive-amount">
+              Сколько пришло на руки (₸)
+            </label>
+            <input
+              id="receive-amount"
+              type="number"
+              value={amount}
+              autoFocus
+              onChange={(e) => setAmount(e.target.value)}
+            />
+            <div className="field-hint" style={{ marginTop: 6 }}>
+              По настройке выходит {formatMoney(calculated)}
+              {commission > 0 && ` (агрегатор удержит ${formatMoney(commission)})`}. Если
+              пришло по-другому — поправьте здесь, запишется ровно то, что вы ввели.
+            </div>
+          </div>
+
+          {valid && Math.abs(diff) >= 1 && (
+            <div className="mv-diff">
+              Отличается от расчётного на {formatMoney(Math.abs(diff))}
+              {diff > 0 ? ' больше' : ' меньше'}
+            </div>
+          )}
+
+          <div className="modal-footer">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Отмена
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={!valid}>
+              <Check size={16} />
+              Записать
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 interface LoanForm {
   title: string;
   source: string;
@@ -115,7 +205,7 @@ export interface LoansIncomeModalProps {
       nextDate: string;
     }
   ) => Promise<void>;
-  onReceiveIncome: (id: number) => void;
+  onReceiveIncome: (id: number, actualAmount?: number) => void;
   onToggleIncome: (id: number) => void;
   onDeleteIncome: (id: number) => void;
 }
@@ -156,6 +246,10 @@ export function LoansIncomeModal({
   const [editingIncomeId, setEditingIncomeId] = useState<number | null>(null);
   const [repay, setRepay] = useState<RepayDraft>(null);
   const [error, setError] = useState('');
+  /** Выплата, для которой спрашиваем фактически пришедшую сумму */
+  const [receivingId, setReceivingId] = useState<number | null>(null);
+
+  const receiving = receivingId !== null ? income.find((i) => i.id === receivingId) : undefined;
 
   const openLoans = loans.filter((l) => l.remaining > 0.001);
   const closedLoans = loans.filter((l) => l.remaining <= 0.001);
@@ -749,7 +843,7 @@ export function LoansIncomeModal({
                           {!off && (
                             <button
                               className="btn btn-secondary li-repay-btn"
-                              onClick={() => onReceiveIncome(item.id)}
+                              onClick={() => setReceivingId(item.id)}
                             >
                               Получено
                             </button>
@@ -803,6 +897,21 @@ export function LoansIncomeModal({
           </button>
         </div>
       </div>
+
+      {/* Поверх окна: сколько реально пришло. Сумма у агрегаторов гуляет,
+          поэтому доверять только расчёту по проценту нельзя. */}
+      {receiving && (
+        <ReceiveDialog
+          title={receiving.title}
+          calculated={receiving.net}
+          commission={Math.round((receiving.amount - receiving.net) * 100) / 100}
+          onClose={() => setReceivingId(null)}
+          onConfirm={(actual) => {
+            setReceivingId(null);
+            onReceiveIncome(receiving.id, actual);
+          }}
+        />
+      )}
     </div>
   );
 }

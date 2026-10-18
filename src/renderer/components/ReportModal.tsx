@@ -1,6 +1,16 @@
 import { useEffect, useState, Fragment } from 'react';
 import ReportCharts from './ReportCharts';
-import { X, FileDown, TrendingDown, Wallet, Receipt, Banknote, Sheet, HandCoins } from 'lucide-react';
+import {
+  X,
+  FileDown,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+  Receipt,
+  Banknote,
+  Sheet,
+  HandCoins,
+} from 'lucide-react';
 import type { Period, Report } from '../types';
 import { formatMoney, getPeriodLabel } from '../lib/format';
 import { depositColorMap, expenseColorMap } from '../lib/reportColors';
@@ -120,6 +130,31 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
                   {formatMoney(report.totalExpenses)}
                 </div>
               </div>
+              {/* Кредиты — отдельной графой, а не строкой под карточками.
+                  Ни доход, ни расход, но остаток двигает, поэтому без этого
+                  слагаемого уравнение «начало + внесения − траты = на выходе»
+                  не сходится на сумму взятого и возвращённого. */}
+              <div className="summary-card">
+                <div className="summary-label">
+                  <HandCoins size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                  Кредиты
+                </div>
+                <div
+                  className={`summary-value ${
+                    report.loanNet === 0
+                      ? 'neutral'
+                      : report.loanNet > 0
+                        ? 'positive'
+                        : 'negative'
+                  }`}
+                >
+                  {report.loanNet !== 0 ? (report.loanNet > 0 ? '+' : '-') : ''}
+                  {formatMoney(Math.abs(report.loanNet))}
+                </div>
+                <div className="summary-hint">
+                  взято {formatMoney(report.loanTaken)} · возврат {formatMoney(report.loanRepaid)}
+                </div>
+              </div>
               <div className="summary-card">
                 <div className="summary-label">
                   <Wallet size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
@@ -136,14 +171,13 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
             </div>
             )}
 
-            {/* Движения по займам. Без этой строки итог не сходится: деньги
-                займа меняют остаток, но не являются ни доходом, ни расходом,
-                поэтому в суммы выше они не попали. */}
+            {/* Разбивка кредитов. В карточках выше это одно число «взято минус
+                возвращено», здесь видно, из чего оно сложилось. */}
             {tab === 'all' && (report.loanTaken > 0 || report.loanRepaid > 0) && (
               <div className="loan-report-row">
                 <HandCoins size={14} />
                 <span>
-                  Займы: взято <strong>{formatMoney(report.loanTaken)}</strong>, возвращено{' '}
+                  Кредиты: взято <strong>{formatMoney(report.loanTaken)}</strong>, возвращено{' '}
                   <strong>{formatMoney(report.loanRepaid)}</strong>
                 </span>
                 {report.openLoanDebt > 0 && (
@@ -151,6 +185,19 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
                     долг сейчас {formatMoney(report.openLoanDebt)}
                   </span>
                 )}
+              </div>
+            )}
+
+            {/* Удержание агрегаторов — не трата, а вычет из дохода, поэтому
+                в «Траты» его нет и показывается отдельной строкой. */}
+            {tab === 'all' && report.withheldByAggregators > 0 && (
+              <div className="loan-report-row">
+                <TrendingUp size={14} />
+                <span>
+                  Агрегаторы удержали{' '}
+                  <strong>{formatMoney(report.withheldByAggregators)}</strong>
+                </span>
+                <span className="loan-report-debt">из внесений, не трата</span>
               </div>
             )}
 
@@ -259,6 +306,22 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
                   {formatMoney(report.totalExpenses)}
                 </span>
               </div>
+              {/* Та же строка, что и карточка сверху. Без неё этот список
+                  расходится с итогом всякий раз, когда кредит взят и не
+                  возвращён: деньги займа двигают остаток, оставаясь вне
+                  «Внесений» и «Трат». Нулевой кредит не печатаем — иначе
+                  уравнение раздувается лишним нулём. */}
+              {(report.loanTaken > 0 || report.loanRepaid > 0) && (
+                <div className="ledger-row">
+                  <span className="ledger-label">
+                    <HandCoins size={14} /> Кредиты
+                  </span>
+                  <span className="ledger-value" style={{ color: 'var(--accent-purple)' }}>
+                    {report.loanNet > 0 ? '+' : report.loanNet < 0 ? '-' : ''}
+                    {formatMoney(Math.abs(report.loanNet))}
+                  </span>
+                </div>
+              )}
               <div className="ledger-row">
                 <span
                   className="ledger-label"

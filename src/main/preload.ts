@@ -85,6 +85,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     note?: string;
   }) => ipcRenderer.invoke('db:addTransfer', transfer),
   deleteTransfer: (id: number) => ipcRenderer.invoke('db:deleteTransfer', id),
+  getMoneyMovements: (range: { startDate: string; endDate: string }) =>
+    ipcRenderer.invoke('db:getMoneyMovements', range),
 
   // Займы: деньги пришли и ушли, но ни доходом, ни расходом не являются
   getLoans: () => ipcRenderer.invoke('db:getLoans'),
@@ -129,8 +131,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('db:updateRecurringIncome', item),
   toggleRecurringIncome: (id: number) => ipcRenderer.invoke('db:toggleRecurringIncome', id),
   deleteRecurringIncome: (id: number) => ipcRenderer.invoke('db:deleteRecurringIncome', id),
-  receiveRecurringIncome: (id: number, accountId?: number) =>
-    ipcRenderer.invoke('db:receiveRecurringIncome', id, accountId),
+  receiveRecurringIncome: (id: number, p?: { actualAmount?: number; accountId?: number }) =>
+    ipcRenderer.invoke('db:receiveRecurringIncome', id, p),
   getRecurringIncomeMonthlyTotal: () => ipcRenderer.invoke('db:getRecurringIncomeMonthlyTotal'),
   
   getReport: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getReport', { startDate, endDate }),

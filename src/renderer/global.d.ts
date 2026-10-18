@@ -7,6 +7,7 @@ import type {
   RecurringOccurrence,
   AccountBalance,
   TransferItem,
+  MoneyMovement,
 } from './types';
 
 export type UpdateState =
@@ -174,6 +175,15 @@ export interface ElectronAPI {
   setAccountColor(id: number, color: string | null): Promise<{ success: boolean }>;
   deleteAccount(id: number): Promise<{ success: boolean }>;
   getTransfers(range: { startDate: string; endDate: string }): Promise<TransferItem[]>;
+  /** Переводы, выплаты агрегаторов и займы одним списком — деньги, которые
+   *  двигаются, но не являются ни доходом, ни расходом */
+  getMoneyMovements(range: { startDate: string; endDate: string }): Promise<{
+    movements: MoneyMovement[];
+    withheld: number;
+    loanDebt: number;
+    loanTaken: number;
+    loanRepaid: number;
+  }>;
   addTransfer(transfer: {
     fromAccountId: number;
     toAccountId: number;
@@ -234,9 +244,14 @@ export interface ElectronAPI {
   }): Promise<{ success: boolean; net: number }>;
   toggleRecurringIncome(id: number): Promise<{ success: boolean }>;
   deleteRecurringIncome(id: number): Promise<{ success: boolean }>;
-  receiveRecurringIncome(id: number, accountId?: number): Promise<{
+  receiveRecurringIncome(id: number, p?: {
+    actualAmount?: number;
+    accountId?: number;
+  }): Promise<{
     success: boolean;
     net: number;
+    /** Сколько удержал агрегатор в этой выплате */
+    withheld: number;
     date: string;
     nextDate: string;
   }>;

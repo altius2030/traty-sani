@@ -1780,6 +1780,162 @@ input::placeholder {
   margin-top: 4px;
 }
 
+/* ——— Движение денежных средств ——— */
+
+.mv-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+}
+
+.mv-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.mv-summary-card {
+  padding: 9px 11px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+
+.mv-summary-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+
+.mv-summary-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.mv-summary-value.warn {
+  color: var(--accent-warning);
+}
+
+.mv-summary-value.ok {
+  color: var(--accent-primary);
+}
+
+.mv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.mv-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+}
+
+.mv-row:hover {
+  background: var(--bg-hover);
+}
+
+.mv-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex-shrink: 0;
+}
+
+.mv-transfer {
+  background: rgba(0, 212, 170, 0.15);
+  color: var(--accent-primary);
+}
+
+.mv-payout {
+  background: rgba(10, 120, 184, 0.18);
+  color: var(--accent-secondary);
+}
+
+.mv-loan {
+  background: rgba(168, 85, 247, 0.16);
+  color: var(--accent-purple);
+}
+
+.mv-repay {
+  background: rgba(168, 85, 247, 0.10);
+  color: var(--accent-purple);
+}
+
+.mv-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.mv-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mv-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.mv-kind {
+  color: var(--text-secondary);
+}
+
+.mv-amount {
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.mv-effect {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* Нулевое влияние — обычный серый, ненулевое подчёркиваем: разница между
+   «перекладывает» и «реально меняет остаток» должна читаться сразу */
+.mv-effect.shift {
+  color: var(--accent-purple);
+  font-weight: 500;
+}
+
+/* Подсказка в диалоге «Получено»: сумма отличается от расчётной по проценту */
+.mv-diff {
+  margin-bottom: 12px;
+  padding: 8px 11px;
+  font-size: 12px;
+  color: var(--accent-warning);
+  background: var(--bg-hover);
+  border: 1px solid var(--accent-warning);
+  border-radius: var(--radius-sm);
+}
+
 /* Объединение категорий: список с чекбоксами */
 .merge-form {
   padding: 12px;
@@ -2011,6 +2167,14 @@ input::placeholder {
 .summary-value.positive { color: var(--accent-primary); }
 .summary-value.negative { color: var(--accent-danger); }
 .summary-value.neutral { color: var(--text-primary); }
+
+/* Подпись под числом в карточке: из чего оно сложилось */
+.summary-hint {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
 
 .report-breakdown {
   margin-top: 24px;

@@ -28,6 +28,11 @@ interface ReportXlsxPayload {
   totalDeposits: number;
   totalExpenses: number;
   endBalance: number;
+  /** Кредиты за период — отдельной строкой, иначе суммы не сойдутся */
+  loanTaken: number;
+  loanRepaid: number;
+  /** Удержание агрегаторов за период: не трата, но сумму съедает */
+  withheldByAggregators: number;
   checkpoint?: { amount: number; date: string | null } | null;
   expenseRows: { date: string; category: string; subcategory: string; item: string; amount: number; note: string }[];
   depositRows: { date: string; category: string; amount: number }[];
@@ -1278,6 +1283,14 @@ const loanOut = db!.prepare(
    WHERE loan_id IS NOT NULL AND ${loanFlowWhere}`
 ).get(...loanFlowParams) as { s: number };
 
+// Сколько удержали агрегаторы за период. Считается по внесениям, где удержание
+// зафиксировано, а не по настройкам выплат: процент там один, а суммы в
+// разные недели разные.
+const withheld = db!.prepare(
+  `SELECT COALESCE(SUM(commission_amount), 0) AS s FROM deposits
+   WHERE commission_amount IS NOT NULL AND ${loanFlowWhere}`
+).get(...loanFlowParams) as { s: number };
+
 const loanRows = db!.prepare(
   `${LOAN_SELECT} ORDER BY l.date_due, l.id`
 ).all() as LoanRow[];
@@ -1297,7 +1310,13 @@ const openLoanDebt = loans.reduce((sum, l) => sum + l.remaining, 0);
     // Движения по займам — отдельно от доходов и расходов
     loanTaken: loanIn.s,
     loanRepaid: loanOut.s,
+    // Разница за период. Это и есть то самое слагаемое, которого не хватает
+    // в «начало + внесения − траты»: деньги займа приходят и уходят, меняя
+    // остаток, но не будучи ни доходом, ни расходом.
+    loanNet: Math.round((loanIn.s - loanOut.s) * 100) / 100,
     openLoanDebt,
+    // Удержание агрегаторов за период — отдельной строкой, не расходом
+    withheldByAggregators: withheld.s,
     loans: reportLoans,
     baseCheckpoint,
     expenses,
@@ -1324,7 +1343,15 @@ ipcMain.handle('report:exportXlsx', async (_, payload: ReportXlsxPayload) => {
     typeof v === 'number' && Number.isFinite(v) ? v : 0;
 
   // ——— Лист «Отчёт» ———
-  const rows: (string | number | { value: string | number; bold?: boolean; fill?: string; numFmt?: string } | null)[][] = [
+  type XlsxCell =
+    | string
+    | number
+    | { value: string | number; bold?: boolean; fill?: string; numFmt?: string }
+    | null;
+type XlsxRow = XlsxCell[];
+
+  // ——— Лист «Отчёт» ———
+  const rows: XlsxRow[] = [
     [{ value: payload.title || 'Отчёт', bold: true }],
     [{ value: `Период: ${payload.period}`, bold: false }],
     [],
@@ -1332,8 +1359,38 @@ ipcMain.handle('report:exportXlsx', async (_, payload: ReportXlsxPayload) => {
     [{ value: 'Начало (база)', bold: true }, { value: isNum(payload.startBalance), numFmt: MONEY }],
     [{ value: 'Внесения за период', bold: true }, { value: isNum(payload.totalDeposits), numFmt: MONEY }],
     [{ value: 'Траты за период', bold: true }, { value: isNum(payload.totalExpenses), numFmt: MONEY }],
-    [{ value: 'На выходе', bold: true }, { value: isNum(payload.endBalance), numFmt: MONEY, fill: '#00d4aa' }],
   ];
+
+  // Кредиты и удержание агрегаторов — между тратами и итогом. Без них строки
+  // выше не складываются в «На выходе»: заём двигает остаток, не будучи ни
+  // доходом, ни расходом, а удержание съедает часть внесения. Пишем только
+  // когда они есть, иначе в уравнении файла будет лишний ноль.
+  const loanTaken = isNum(payload.loanTaken);
+  const loanRepaid = isNum(payload.loanRepaid);
+  if (loanTaken || loanRepaid) {
+    rows.push(
+      [
+        { value: 'Кредиты за период (взято − возвращено)', bold: true },
+        { value: loanTaken - loanRepaid, numFmt: MONEY },
+      ],
+      // Расшифровка под суммой: само число «взято − возвращено» мало о чём
+      // говорит, когда смотришь файл, а не экран
+      [null, { value: `взято ${loanTaken} · возврат ${loanRepaid}` }]
+    );
+  }
+
+  const withheldAgg = isNum(payload.withheldByAggregators);
+  if (withheldAgg) {
+    rows.push([
+      { value: 'Удержано агрегаторами (из внесений, не трата)' },
+      { value: withheldAgg, numFmt: MONEY },
+    ]);
+  }
+
+  rows.push([
+    { value: 'На выходе', bold: true },
+    { value: isNum(payload.endBalance), numFmt: MONEY, fill: '#00d4aa' },
+  ]);
 
   if (payload.checkpoint?.date) {
     rows.push([
@@ -1926,6 +1983,165 @@ ipcMain.handle('db:deleteTransfer', (_, id: number) => {
   return { success: true };
 });
 
+/**
+ * Движение денежных средств: всё, что не является ни доходом, ни расходом.
+ *
+ * Перевод между своими счетами, выплата агрегатора и заём — три разные истории,
+ * объединённые тем, что ни одна из них не попала ни в «Внесения», ни в «Траты»
+ * отчёта. Из этого, однако, НЕ следует, что остаток не меняется:
+ *
+ *  - перевод перекладывает деньги между своими счетами — общий итог тот же;
+ *  - выплата агрегатора приходит чистой суммой, удержание уже учтено;
+ *  - заём двигает остаток по-настоящему: деньги пришли и ушли, но это не
+ *    доход и не расход, а чужие деньги, которые нужно вернуть.
+ *
+ * Поэтому effect у последних двух не ноль, и в интерфейсе он показан явно:
+ * иначе фраза «не входит в траты» читалась бы как «остаток не меняется».
+ *
+ * Остаток долга сюда НЕ вносится: это состояние, а не операция. Оно и так
+ * видно в карточке сверху, а в списке операций мешало бы считать движение.
+ *
+ * Собираем в JS, а не одним UNION: у четырёх источников разный набор полей, и
+ * приводить их к общей таблице было бы больше кода, чем честная склейка.
+ */
+ipcMain.handle('db:getMoneyMovements', (_, range: { startDate: string; endDate: string }) => {
+  const { startDate, endDate } = range;
+
+  const transfers = db!.prepare(
+    `SELECT t.id, t.date, t.amount, t.note,
+            f.name AS from_name, f.color AS from_color,
+            t2.name AS to_name, t2.color AS to_color
+     FROM transfers t
+     JOIN accounts f ON f.id = t.from_account_id
+     JOIN accounts t2 ON t2.id = t.to_account_id
+     WHERE date(t.date) BETWEEN date(?) AND date(?)
+     ORDER BY date(t.date) DESC`
+  ).all(startDate, endDate) as any[];
+
+  // Выплаты агрегаторов: внесение чистое, удержание лежит рядом
+  const payouts = db!.prepare(
+    `SELECT d.id, d.date, d.amount, d.commission_amount, d.note,
+            c.name AS category_name
+     FROM deposits d
+     LEFT JOIN deposit_categories c ON c.id = d.category_id
+     WHERE d.commission_amount IS NOT NULL
+       AND date(d.date) BETWEEN date(?) AND date(?)
+     ORDER BY date(d.date) DESC`
+  ).all(startDate, endDate) as any[];
+
+  // Все займы целиком — только чтобы посчитать текущий долг. Период здесь
+  // не применяется намеренно: долг не «за период», он есть сейчас.
+  const loanRows = db!.prepare(
+    `SELECT COALESCE((SELECT SUM(amount) FROM deposits WHERE loan_id = l.id), 0) AS taken,
+            COALESCE((SELECT SUM(amount) FROM expenses  WHERE loan_id = l.id), 0) AS repaid
+     FROM loans l`
+  ).all() as { taken: number; repaid: number }[];
+
+  const loansIn = db!.prepare(
+    `SELECT d.id, d.date, d.amount, d.note, l.title AS loan_title, l.id AS loan_id
+     FROM deposits d JOIN loans l ON l.id = d.loan_id
+     WHERE d.loan_id IS NOT NULL AND date(d.date) BETWEEN date(?) AND date(?)
+     ORDER BY date(d.date) DESC`
+  ).all(startDate, endDate) as any[];
+
+  const loansOut = db!.prepare(
+    `SELECT e.id, e.date, e.amount, e.note, l.title AS loan_title, l.id AS loan_id
+     FROM expenses e JOIN loans l ON l.id = e.loan_id
+     WHERE e.loan_id IS NOT NULL AND date(e.date) BETWEEN date(?) AND date(?)
+     ORDER BY date(e.date) DESC`
+  ).all(startDate, endDate) as any[];
+
+  type Movement = {
+    key: string;
+    kind: 'transfer' | 'payout' | 'loan_in' | 'loan_repay';
+    date: string;
+    title: string;
+    amount: number;
+    /** Влияние на общий остаток. Ноль у переводов и выплат, у займов — нет. */
+    effect: number;
+    detail: string;
+    color: string | null;
+    extra?: string | null;
+    canDelete: boolean;
+  };
+
+  const movements: Movement[] = [];
+
+  for (const t of transfers) {
+    movements.push({
+      key: `t${t.id}`,
+      kind: 'transfer',
+      date: t.date,
+      title: t.note || `${t.from_name} → ${t.to_name}`,
+      amount: t.amount,
+      effect: 0,
+      detail: `${t.from_name} → ${t.to_name}`,
+      color: t.from_color,
+      canDelete: true,
+    });
+  }
+
+  for (const p of payouts) {
+    movements.push({
+      key: `p${p.id}`,
+      kind: 'payout',
+      date: p.date,
+      title: p.note || p.category_name || 'Выплата агрегатора',
+      amount: p.amount,
+      effect: 0,
+      detail: 'выплата агрегатора',
+      color: null,
+      // Ноль удержания — обычное дело (бонусная неделя, нулевой процент),
+      // и писать «удержано 0» незачем. Сама выплата в списке остаётся: колонка
+      // commission_amount заполнена и нулем тоже, именно этим она и помечена.
+      extra: p.commission_amount > 0 ? `удержано ${p.commission_amount}` : null,
+      canDelete: false,
+    });
+  }
+
+  for (const l of loansIn) {
+    movements.push({
+      key: `li${l.id}`,
+      kind: 'loan_in',
+      date: l.date,
+      title: l.note || l.loan_title,
+      amount: l.amount,
+      effect: l.amount,
+      detail: 'заём получен',
+      color: null,
+      extra: 'деньги чужие, их надо вернуть',
+      canDelete: false,
+    });
+  }
+
+  for (const l of loansOut) {
+    movements.push({
+      key: `lr${l.id}`,
+      kind: 'loan_repay',
+      date: l.date,
+      title: l.note || l.loan_title,
+      amount: l.amount,
+      effect: -l.amount,
+      detail: 'возврат займа',
+      color: null,
+      canDelete: false,
+    });
+  }
+
+  movements.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+
+  return {
+    movements,
+    // Удержание — за период, как всё остальное на этом экране
+    withheld: payouts.reduce((s, p) => s + (p.commission_amount ?? 0), 0),
+    // Движение кредитов — за период
+    loanTaken: loansIn.reduce((s, l) => s + l.amount, 0),
+    loanRepaid: loansOut.reduce((s, l) => s + l.amount, 0),
+    // Долг, наоборот, всегда текущий: период тут ни при чём
+    loanDebt: loanRows.reduce((s, l) => s + Math.max(0, l.taken - l.repaid), 0),
+  };
+});
+
 // ——— Займы ———
 
 /**
@@ -2241,25 +2457,61 @@ ipcMain.handle('db:deleteRecurringIncome', (_, id: number) => {
  * Дата сразу сдвигается до будущего: пропущенные выплаты не копятся,
  * одна отметка закрывает всю задолженность, как и у регулярных платежей.
  */
-ipcMain.handle('db:receiveRecurringIncome', (_, id: number, accountId?: number) => {
-  const row = db!.prepare(`${RECURRING_INCOME_SELECT} WHERE r.id = ?`).get(id) as
-    | RecurringIncomeRow
-    | undefined;
-  if (!row) throw new Error('Выплата не найдена');
+/**
+ * Отметка выплаты полученной.
+ *
+ * Внесение создаётся на дату выплаты, а не на сегодня — иначе выплата,
+ * пришедшая в пятницу и отмеченная в понедельник, попала бы в другой месяц.
+ * Дата сразу сдвигается до будущего: пропущенные выплаты не копятся,
+ * одна отметка закрывает всю задолженность, как и у регулярных платежей.
+ *
+ * Сумма нефиксированная: у агрегаторов каждая неделя разная, поэтому можно
+ * передать ФАКТИЧЕСКУЮ сумму, пришедшую на карту. Расчётная сумма из настройки
+ * используется только как значение по умолчанию и как ориентир «в месяц».
+ * Настройку молча не переписываем: одна бурная неделя не должна навсегда
+ * сдвинуть базовую сумму.
+ *
+ * Удержание агрегатора сохраняем отдельной суммой в том же внесении. Как
+ * трату его записывать нельзя: внесение уже чистое, и второй вычет увёл бы
+ * остаток на двойную комиссию.
+ *
+ * Колонка заполняется ВСЕГДА, даже когда агрегатор ничего не удержал (бонусная
+ * неделя, нулевой процент): NULL здесь означает «это обычное внесение», а не
+ * «удержания не было». Иначе выплата без удержания не отличилась бы от
+ * обычного внесения и пропала бы с экрана движения денег. Ноль на суммах
+ * ничего не меняет — он только помечает выплату.
+ */
+ipcMain.handle(
+  'db:receiveRecurringIncome',
+  (_, id: number, p?: { actualAmount?: number; accountId?: number }) => {
+    const row = db!.prepare(`${RECURRING_INCOME_SELECT} WHERE r.id = ?`).get(id) as
+      | RecurringIncomeRow
+      | undefined;
+    if (!row) throw new Error('Выплата не найдена');
 
-  const net = netIncome(row.amount, row.commission);
-  const nextDate = advanceUntilFuture(row.next_date, row.frequency, todayISO());
+    // Что пришло на руки: факт, если передан, иначе расчёт от настройки
+    const actual = Number(p?.actualAmount);
+    const net =
+      Number.isFinite(actual) && actual > 0
+        ? Math.round(actual * 100) / 100
+        : netIncome(row.amount, row.commission);
+    // Удержание: сколько было начислено минус сколько пришло. Ноль — тоже
+    // значение: он помечает выплату агрегатора (см. выше).
+    const withheld = Math.max(0, Math.round((row.amount - net) * 100) / 100);
+    const nextDate = advanceUntilFuture(row.next_date, row.frequency, todayISO());
 
-  const run = db!.transaction(() => {
-    db!.prepare(
-      `INSERT INTO deposits (amount, date, category_id, note, account_id) VALUES (?, ?, ?, ?, ?)`
-    ).run(net, row.next_date, row.category_id, row.title, resolveAccount(accountId));
-    db!.prepare('UPDATE recurring_income SET next_date = ? WHERE id = ?').run(nextDate, id);
-  });
-  run();
+    const run = db!.transaction(() => {
+      db!.prepare(
+        `INSERT INTO deposits (amount, date, category_id, note, account_id, commission_amount)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(net, row.next_date, row.category_id, row.title, resolveAccount(p?.accountId), withheld);
+      db!.prepare('UPDATE recurring_income SET next_date = ? WHERE id = ?').run(nextDate, id);
+    });
+    run();
 
-  return { success: true, net, date: row.next_date, nextDate };
-});
+    return { success: true, net, withheld, date: row.next_date, nextDate };
+  }
+);
 
 /** Сколько постоянно приходит в месяц — уже после удержания процентов */
 ipcMain.handle('db:getRecurringIncomeMonthlyTotal', () => {

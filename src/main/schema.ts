@@ -229,6 +229,9 @@ export const SCHEMA_SQL = `
   );
 
   CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(date);
+
+  -- Сколько удержал агрегатор в конкретной выплате, живёт в deposits и
+  -- добавляется миграцией: см. migrateAggregators в applySchema.
 `;
 
 export const DEFAULT_CATEGORIES: { name: string; type: string; sortOrder: number }[] = [
@@ -349,6 +352,26 @@ export function migrateAccounts(database: Database): boolean {
     CREATE INDEX IF NOT EXISTS idx_deposits_account ON deposits(account_id);
   `);
   return changed;
+}
+
+/**
+ * Добавляет deposits.commission_amount — сколько агрегатор удержал в выплате.
+ *
+ * Внесение всегда пишется чистым, то есть «сколько пришло на руки». Без
+ * отдельного поля сумму удержания негде было взять: по программе нельзя было
+ * ответить, сколько забрал агрегатор за месяц.
+ *
+ * Колонка nullable, и в этом её смысл: NULL — это обычное внесение, число
+ * (включая ноль) — выплата агрегатора. Ноль нельзя схлопывать в NULL, иначе
+ * выплата без удержания стала бы неотличима от обычного внесения и пропала бы
+ * с экрана движения денег.
+ */
+export function migrateAggregators(database: Database): boolean {
+  const cols = database.prepare('PRAGMA table_info(deposits)').all() as { name: string }[];
+  if (cols.some((c) => c.name === 'commission_amount')) return false;
+  database.exec(`ALTER TABLE deposits ADD COLUMN commission_amount REAL`);
+  console.log('[schema] Добавлена колонка deposits.commission_amount');
+  return true;
 }
 
 /**
@@ -535,6 +558,7 @@ export function applySchema(database: Database): void {
   // таблицей, уже видит nullable category_id.
   migrateExpensesNullableCategory(database);
   migrateAccounts(database);
+  migrateAggregators(database);
 
   // Миграция: уникальность подкатегорий внутри категории.
   // Без этого повторные запуски дублируют дефолтные подкатегории,

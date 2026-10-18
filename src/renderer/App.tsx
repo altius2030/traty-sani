@@ -16,6 +16,7 @@ import ToastContainer from './components/ToastContainer';
 import { RecurringModal } from './components/Recurring';
 import { LoansIncomeModal } from './components/Loans';
 import { TransferModal } from './components/Transfers';
+import { MovementsModal } from './components/Movements';
 import type {
   DepositCategory,
   Category,
@@ -33,6 +34,7 @@ import type {
   RecurringIncomeItem,
   AccountBalance,
   TransferItem,
+  MoneyMovement,
 } from './types';
 import type { MainTab } from './components/ExpenseTable';
 import {
@@ -181,6 +183,13 @@ function App() {
   const [accounts, setAccounts] = useState<AccountBalance[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [transfers, setTransfers] = useState<TransferItem[]>([]);
+  const [movementsData, setMovementsData] = useState<{
+    movements: MoneyMovement[];
+    withheld: number;
+    loanDebt: number;
+    loanTaken: number;
+    loanRepaid: number;
+  } | null>(null);
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => {
@@ -206,6 +215,7 @@ function App() {
     | { type: 'recurring' }
     | { type: 'loans' }
     | { type: 'transfers' }
+    | { type: 'movements' }
     | null
   >(null);
   const [confirmDelete, setConfirmDelete] = useState<
@@ -305,6 +315,14 @@ const loadRecurring = useCallback(async () => {
     setTransfers(data);
   }, [period]);
 
+  const loadMovements = useCallback(async () => {
+    const data = await window.electronAPI.getMoneyMovements({
+      startDate: period.startDate,
+      endDate: period.endDate,
+    });
+    setMovementsData(data);
+  }, [period]);
+
   // Загрузка данных ———
   const loadCategories = useCallback(async () => {
     const data = await window.electronAPI.getCategories();
@@ -388,11 +406,23 @@ const loadRecurring = useCallback(async () => {
       ? expenses.length - visibleExpenses.length
       : deposits.length - visibleDeposits.length;
 
+  /**
+   * Пересчёт всех денежных сумм на экране.
+   *
+   * Остаток и суммы по счетам берутся из разных источников: первый — общий
+   * итог, второй — разбивка по счетам для боковой панели. Но меняет их одно и
+   * то же действие, поэтому обновляются они всегда вместе. Раньше удаление
+   * внесения пересчитывало остаток и забывало про счета, и боковая панель
+   * показывала сумму удалённой записи ещё несколько секунд.
+   */
   const loadBalances = useCallback(async () => {
-    const balance = await window.electronAPI.getCurrentBalance();
+    const [balance] = await Promise.all([
+      window.electronAPI.getCurrentBalance(),
+      loadAccounts(),
+    ]);
     setCurrentBalance(balance.balance);
     setBaseCheckpoint({ amount: balance.base, date: balance.baseDate });
-  }, []);
+  }, [loadAccounts]);
 
   const loadDepositCategories = useCallback(async () => {
     const list = await window.electronAPI.getDepositCategories();
@@ -438,6 +468,12 @@ const loadRecurring = useCallback(async () => {
     if (modal?.type !== 'transfers') return;
     loadTransfers().catch(() => {});
   }, [modal?.type, loadTransfers]);
+
+  // Движение денег живёт в своём окне и тоже подвязано к периоду
+  useEffect(() => {
+    if (modal?.type !== 'movements') return;
+    loadMovements().catch(() => {});
+  }, [modal?.type, loadMovements]);
 
   /**
  * Горячие клавиши.
@@ -1016,13 +1052,19 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
   };
 
   /** Отметка выплаты: сервер создаёт внесение на дату выплаты и двигает дату */
-  const handleReceiveIncome = async (id: number) => {
+  const handleReceiveIncome = async (id: number, actualAmount?: number) => {
     try {
-      const res = await window.electronAPI.receiveRecurringIncome(
-        id,
-        selectedAccountId ?? undefined
-      );
-      await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances(), loadAccounts()]);
+      const res = await window.electronAPI.receiveRecurringIncome(id, {
+        actualAmount,
+        accountId: selectedAccountId ?? undefined,
+      });
+      await Promise.all([
+        loadLoansAndIncome(),
+        loadExpenses(period),
+        loadBalances(),
+        loadAccounts(),
+        loadMovements(),
+      ]);
       const when = new Date(res.date).toLocaleDateString('ru-RU', {
         day: '2-digit',
         month: '2-digit',
@@ -1031,7 +1073,11 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
         day: '2-digit',
         month: '2-digit',
       });
-      addToast(`Внесено ${formatMoney(res.net)} от ${when}, следующая ${next}`, 'success');
+      addToast(
+        `Внесено ${formatMoney(res.net)} от ${when}, следующая ${next}` +
+          (res.withheld > 0 ? `. Агрегатор удержал ${formatMoney(res.withheld)}` : ''),
+        'success'
+      );
     } catch (err) {
       addToast(err instanceof Error ? err.message : 'Не удалось отметить выплату', 'error');
     }
@@ -1128,6 +1174,19 @@ const loadRecurringCalendar = useCallback(
     lines.push(`На начало периода: ${rep.startBalance.toFixed(2)} ₸`);
     lines.push(`Внесения за период: ${rep.totalDeposits.toFixed(2)} ₸`);
     lines.push(`Траты за период: ${rep.totalExpenses.toFixed(2)} ₸`);
+    // Кредиты — слагаемое, без которого суммы выше не дают «На выходе».
+    // Не пишем его безусловно: в периоде без займов строка только мешает.
+    if (rep.loanTaken > 0 || rep.loanRepaid > 0) {
+      lines.push(
+        `Кредиты за период: взято ${rep.loanTaken.toFixed(2)} ₸, ` +
+          `возвращено ${rep.loanRepaid.toFixed(2)} ₸, итого ${rep.loanNet.toFixed(2)} ₸`
+      );
+    }
+    // Удержание агрегатора — не трата, в суммы не входит, но сумму отнимает
+    // от того, что было начислено. Отдельной строкой, иначе в выгрузке пропадёт.
+    if (rep.withheldByAggregators > 0) {
+      lines.push(`Удержано агрегаторами: ${rep.withheldByAggregators.toFixed(2)} ₸ (из внесений)`);
+    }
     lines.push(`На выходе: ${rep.endBalance.toFixed(2)} ₸`);
     if (rep.baseCheckpoint?.date) {
       lines.push(
@@ -1232,6 +1291,11 @@ const loadRecurringCalendar = useCallback(
         totalDeposits: rep.totalDeposits,
         totalExpenses: rep.totalExpenses,
         endBalance: rep.endBalance,
+        // Кредиты и удержание агрегаторов — в том же отчёте, что и на экране.
+        // Без них файл показывает суммы, которые не дают «На выходе».
+        loanTaken: rep.loanTaken,
+        loanRepaid: rep.loanRepaid,
+        withheldByAggregators: rep.withheldByAggregators,
         checkpoint: rep.baseCheckpoint,
         expenseRows: rep.expenses.map((e) => ({
           date: e.date,
@@ -1419,6 +1483,17 @@ const handleOpenReleases = async () => {
             </div>
           )}
         </div>
+
+        {/* Движение денег — в строке меню, сразу за «Файл», а не на главной
+            панели среди «Трата»/«Внесение». Там уже четыре кнопки, и пятая
+            сдвигала бы то, чем пользуются каждый день. */}
+        <button
+          className="file-menu-trigger"
+          onClick={() => setModal({ type: 'movements' })}
+        >
+          <ArrowLeftRight size={13} style={{ marginRight: 5, verticalAlign: 'middle' }} />
+          Движение денег
+        </button>
 
         <span className="drag-region-title">
           Траты Сани <span className="drag-region-version">v{__APP_VERSION__}</span>
@@ -1634,6 +1709,14 @@ const handleOpenReleases = async () => {
           onReceiveIncome={handleReceiveIncome}
           onToggleIncome={handleToggleIncome}
           onDeleteIncome={handleDeleteIncome}
+        />
+      )}
+
+      {modal?.type === 'movements' && (
+        <MovementsModal
+          data={movementsData}
+          onClose={() => setModal(null)}
+          onDeleteTransfer={handleDeleteTransfer}
         />
       )}
 
