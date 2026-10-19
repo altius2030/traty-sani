@@ -36,6 +36,17 @@ const KIND_META: Record<
 /** Вкладки группируют виды операций, а не совпадают с ними один в один */
 type TabId = 'all' | 'transfer' | 'payout' | 'loan';
 
+/**
+ * Блок списка: одна обычная операция либо все операции одного займа.
+ *
+ * Группировка нужна, чтобы по займу был виден его собственный итог: сколько
+ * под него записывали поступлений и сколько вернули. Без неё суммы разных
+ * займов стояли рядом и читались как противоречие.
+ */
+type Block =
+  | { kind: 'plain'; items: MoneyMovement[] }
+  | { kind: 'loan'; loanId: number; title: string; items: MoneyMovement[] };
+
 const TAB_KINDS: Record<Exclude<TabId, 'all'>, MoneyMovement['kind'][]> = {
   transfer: ['transfer'],
   payout: ['payout'],
@@ -75,6 +86,82 @@ export function MovementsModal({ data, onClose, onDeleteTransfer }: MovementsMod
     { id: 'payout', label: 'Агрегаторы', count: counts.payout },
     { id: 'loan', label: 'Кредиты', count: counts.loan },
   ];
+
+  /**
+   * Список разбит на блоки: обычные операции идут как есть, а всё, что
+   * относится к одному займу, собирается под ним.
+   *
+   * Без группировки суммы разных займов сравнивались между собой и выглядели
+   * ошибкой: рядом «взяли 100 000» и «вернули 1 200 000», хотя 100 000 брали
+   * под один кредит, а возвращали — под три других. У займа, созданного с
+   * галочкой «не записывать приход», записей о поступлении нет вовсе, так что
+   * цифры по нему и не должны сходиться между собой.
+   */
+  const blocks: Block[] = [];
+  const openLoan = new Map<number, Block>();
+
+  for (const m of shown) {
+    if (m.loanId === undefined) {
+      blocks.push({ kind: 'plain', items: [m] });
+      continue;
+    }
+    const existing = openLoan.get(m.loanId);
+    if (existing) {
+      existing.items.push(m);
+    } else {
+      const block: Block = {
+        kind: 'loan',
+        loanId: m.loanId,
+        // Заголовок берём из любой его операции: у получения и возврата
+        // название может отличаться, если в заметке что-то уточняли.
+        title: m.title,
+        items: [m],
+      };
+      openLoan.set(m.loanId, block);
+      blocks.push(block);
+    }
+  }
+
+  /** Одна операция: иконка вида, название, сумма и её влияние на остаток. */
+  const renderRow = (m: MoneyMovement) => {
+    const meta = KIND_META[m.kind];
+    const I = meta.icon;
+    return (
+      <div key={m.key} className="mv-row">
+        <div className={`mv-icon ${meta.cls}`}>
+          <I size={15} />
+        </div>
+        <div className="mv-main">
+          <div className="mv-title">{m.title}</div>
+          <div className="mv-meta">
+            <span className="mv-kind">{meta.label}</span> · {m.detail}
+            {m.extra ? ` · ${m.extra}` : ''}
+          </div>
+        </div>
+        <div className="mv-amount">
+          {formatMoney(m.amount)}
+          {/* Влияние на остаток у всех видов разное: у перевода и выплаты —
+              ноль, у кредита — сама сумма. Подписываем явно, иначе «не
+              входит в траты» читается как «остаток не меняется». */}
+          <div className={`mv-effect ${m.effect === 0 ? 'zero' : 'shift'}`}>
+            {m.effect === 0
+              ? 'на остаток: 0'
+              : `на остаток: ${m.effect > 0 ? '+' : '−'}${formatMoney(Math.abs(m.effect))}`}
+          </div>
+        </div>
+        {m.canDelete && (
+          <button
+            className="action-btn"
+            onClick={() => onDeleteTransfer(Number(m.key.slice(1)))}
+            title="Удалить перевод"
+            aria-label="Удалить перевод"
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -149,47 +236,30 @@ export function MovementsModal({ data, onClose, onDeleteTransfer }: MovementsMod
           </div>
         ) : (
           <div className="mv-list">
-            {shown.map((m) => {
-              const meta = KIND_META[m.kind];
-              const I = meta.icon;
-              return (
-                <div key={m.key} className="mv-row">
-                  <div className={`mv-icon ${meta.cls}`}>
-                    <I size={15} />
-                  </div>
-                  <div className="mv-main">
-                    <div className="mv-title">{m.title}</div>
-                    <div className="mv-meta">
-                      <span className="mv-kind">{meta.label}</span> · {m.detail}
-                      {m.extra ? ` · ${m.extra}` : ''}
+            {blocks.map((block) => {
+              if (block.kind === 'loan') {
+                const taken = block.items
+                  .filter((m) => m.kind === 'loan_in')
+                  .reduce((s, m) => s + m.amount, 0);
+                const repaid = block.items
+                  .filter((m) => m.kind === 'loan_repay')
+                  .reduce((s, m) => s + m.amount, 0);
+                return (
+                  <div key={`ln${block.loanId}`} className="mv-loan-group">
+                    <div className="mv-loan-head">
+                      <HandCoins size={14} />
+                      <span className="mv-loan-name">{block.title}</span>
+                      <span className="mv-loan-figures">
+                        {taken > 0 && `взято ${formatMoney(taken)}`}
+                        {taken > 0 && repaid > 0 && ' · '}
+                        {repaid > 0 && `возвращено ${formatMoney(repaid)}`}
+                      </span>
                     </div>
+                    {block.items.map((m) => renderRow(m))}
                   </div>
-                  <div className="mv-amount">
-                    {formatMoney(m.amount)}
-                    {/* Влияние на остаток у всех видов разное: у перевода и
-                        выплаты — ноль, у кредита — сама сумма. Подписываем
-                        явно, иначе «не входит в траты» читается как
-                        «остаток не меняется», а это неправда для кредита. */}
-                    <div className={`mv-effect ${m.effect === 0 ? 'zero' : 'shift'}`}>
-                      {m.effect === 0
-                        ? 'на остаток: 0'
-                        : `на остаток: ${m.effect > 0 ? '+' : '−'}${formatMoney(
-                            Math.abs(m.effect)
-                          )}`}
-                    </div>
-                  </div>
-                  {m.canDelete && (
-                    <button
-                      className="action-btn"
-                      onClick={() => onDeleteTransfer(Number(m.key.slice(1)))}
-                      title="Удалить перевод"
-                      aria-label="Удалить перевод"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  )}
-                </div>
-              );
+                );
+              }
+              return block.items.map((m) => renderRow(m));
             })}
           </div>
         )}

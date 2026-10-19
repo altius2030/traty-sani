@@ -2031,11 +2031,16 @@ ipcMain.handle('db:getMoneyMovements', (_, range: { startDate: string; endDate: 
 
   // Все займы целиком — только чтобы посчитать текущий долг. Период здесь
   // не применяется намеренно: долг не «за период», он есть сейчас.
+  //
+  // База долга — max(объявлено, поступило), а не только поступило. Займ,
+  // созданный с опцией «не записывать приход», внесений не имеет вовсе: при
+  // старой формуле его долг выходил нулём и он молча пропадал из долга.
   const loanRows = db!.prepare(
-    `SELECT COALESCE((SELECT SUM(amount) FROM deposits WHERE loan_id = l.id), 0) AS taken,
+    `SELECT l.amount AS declared,
+            COALESCE((SELECT SUM(amount) FROM deposits WHERE loan_id = l.id), 0) AS taken,
             COALESCE((SELECT SUM(amount) FROM expenses  WHERE loan_id = l.id), 0) AS repaid
      FROM loans l`
-  ).all() as { taken: number; repaid: number }[];
+  ).all() as { declared: number; taken: number; repaid: number }[];
 
   const loansIn = db!.prepare(
     `SELECT d.id, d.date, d.amount, d.note, l.title AS loan_title, l.id AS loan_id
@@ -2054,6 +2059,8 @@ ipcMain.handle('db:getMoneyMovements', (_, range: { startDate: string; endDate: 
   type Movement = {
     key: string;
     kind: 'transfer' | 'payout' | 'loan_in' | 'loan_repay';
+    /** Только у операций по займу: нужен, чтобы собрать их в группы */
+    loanId?: number;
     date: string;
     title: string;
     amount: number;
@@ -2103,6 +2110,7 @@ ipcMain.handle('db:getMoneyMovements', (_, range: { startDate: string; endDate: 
     movements.push({
       key: `li${l.id}`,
       kind: 'loan_in',
+      loanId: l.loan_id,
       date: l.date,
       title: l.note || l.loan_title,
       amount: l.amount,
@@ -2118,6 +2126,7 @@ ipcMain.handle('db:getMoneyMovements', (_, range: { startDate: string; endDate: 
     movements.push({
       key: `lr${l.id}`,
       kind: 'loan_repay',
+      loanId: l.loan_id,
       date: l.date,
       title: l.note || l.loan_title,
       amount: l.amount,
@@ -2138,7 +2147,10 @@ ipcMain.handle('db:getMoneyMovements', (_, range: { startDate: string; endDate: 
     loanTaken: loansIn.reduce((s, l) => s + l.amount, 0),
     loanRepaid: loansOut.reduce((s, l) => s + l.amount, 0),
     // Долг, наоборот, всегда текущий: период тут ни при чём
-    loanDebt: loanRows.reduce((s, l) => s + Math.max(0, l.taken - l.repaid), 0),
+    loanDebt: loanRows.reduce(
+      (s, l) => s + Math.max(0, Math.max(l.taken, l.declared) - l.repaid),
+      0
+    ),
   };
 });
 

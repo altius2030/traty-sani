@@ -747,7 +747,7 @@ useEffect(() => {
       // Список нужен, чтобы найти саму трату: после удаления её в нём не будет
       const removed = expenses.find((e) => e.id === id);
       await window.electronAPI.deleteExpense(id);
-      await Promise.all([loadExpenses(period), loadBalances()]);
+      await Promise.all([loadExpenses(period), loadBalances(), loadMovements()]);
       if (!removed) {
         addToast('Трата удалена', 'info');
         return;
@@ -757,13 +757,16 @@ useEffect(() => {
         onAction: () =>
           undoDelete(
             () => window.electronAPI.restoreExpense(removed),
-            () => Promise.all([loadExpenses(period), loadBalances()]).then(() => undefined)
+            () =>
+              Promise.all([loadExpenses(period), loadBalances(), loadMovements()]).then(
+                () => undefined
+              )
           ),
       });
     } else if (kind === 'deposit') {
       const removed = deposits.find((d) => d.id === id);
       await window.electronAPI.deleteDeposit(id);
-      await Promise.all([loadExpenses(period), loadBalances()]);
+      await Promise.all([loadExpenses(period), loadBalances(), loadMovements()]);
       if (!removed) {
         addToast('Внесение удалено', 'info');
         return;
@@ -773,7 +776,10 @@ useEffect(() => {
         onAction: () =>
           undoDelete(
             () => window.electronAPI.restoreDeposit(removed),
-            () => Promise.all([loadExpenses(period), loadBalances()]).then(() => undefined)
+            () =>
+              Promise.all([loadExpenses(period), loadBalances(), loadMovements()]).then(
+                () => undefined
+              )
           ),
       });
     } else if (kind === 'category') {
@@ -806,7 +812,16 @@ useEffect(() => {
       await Promise.all([loadDepositCategories(), loadExpenses(period), loadBalances()]);
     } else if (kind === 'loan') {
       const res = await window.electronAPI.deleteLoan(id);
-      await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances()]);
+      // Движение денег обязательно среди перезагрузок: удаление займа уносит
+      // и внесение, и возврат, и без этого их строки остались бы висеть на
+      // экране движения до переоткрытия окна.
+      await Promise.all([
+        loadLoansAndIncome(),
+        loadExpenses(period),
+        loadBalances(),
+        loadAccounts(),
+        loadMovements(),
+      ]);
       const parts: string[] = [];
       if (res.deletedDeposits > 0) {
         parts.push(`${res.deletedDeposits} внес.`);
@@ -984,7 +999,13 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
       ...payload,
       accountId: selectedAccountId ?? undefined,
     });
-    await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances(), loadAccounts()]);
+    await Promise.all([
+      loadLoansAndIncome(),
+      loadExpenses(period),
+      loadBalances(),
+      loadAccounts(),
+      loadMovements(),
+    ]);
     addToast(
       res.recordedDeposit
         ? `Заём заведён, деньги записаны как поступление`
@@ -1003,7 +1024,13 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
       ...payload,
       accountId: selectedAccountId ?? undefined,
     });
-    await Promise.all([loadLoansAndIncome(), loadExpenses(period), loadBalances(), loadAccounts()]);
+    await Promise.all([
+      loadLoansAndIncome(),
+      loadExpenses(period),
+      loadBalances(),
+      loadAccounts(),
+      loadMovements(),
+    ]);
     addToast(
       res.remaining > 0.001
         ? `Возврат записан, осталось ${formatMoney(res.remaining)}`
@@ -1145,7 +1172,9 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
 
   const handleDeleteTransfer = async (id: number) => {
     await window.electronAPI.deleteTransfer(id);
-    await Promise.all([loadAccounts(), loadTransfers(), loadBalances()]);
+    // Перевод удаляется прямо из окна движения, поэтому перечитывать его
+    // обязательно — иначе строка осталась бы висеть под курсором.
+    await Promise.all([loadAccounts(), loadTransfers(), loadBalances(), loadMovements()]);
     addToast('Перевод удалён', 'info');
   };
 

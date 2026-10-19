@@ -171,6 +171,8 @@ export interface MoneyMovement {
   /** Уникально в пределах списка: префикс отличает перевод от займа */
   key: string;
   kind: 'transfer' | 'payout' | 'loan_in' | 'loan_repay';
+  /** Только у операций по займу: нужен, чтобы собрать их в группы */
+  loanId?: number;
   date: string;
   title: string;
   amount: number;

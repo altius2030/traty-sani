@@ -1780,6 +1780,44 @@ input::placeholder {
   margin-top: 4px;
 }
 
+/* Группа операций одного займа: заголовок с его собственными итогами.
+   Без неё суммы разных займов стояли рядом и читались как противоречие —
+   «взяли 100 000, вернули 1 200 000», хотя относилось это к разным кредитам. */
+.mv-loan-group {
+  padding: 2px 0 6px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 4px;
+}
+
+.mv-loan-group:last-child {
+  border-bottom: none;
+}
+
+.mv-loan-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px 4px;
+  color: var(--text-secondary);
+}
+
+.mv-loan-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-purple);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mv-loan-figures {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ——— Движение денежных средств ——— */
 
 .mv-note {
