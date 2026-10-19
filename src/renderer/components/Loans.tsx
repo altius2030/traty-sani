@@ -564,7 +564,7 @@ export function LoansIncomeModal({
                           <div className="recurring-row-meta">
                             {settled
                               ? `возвращено ${formatMoney(loan.repaid)}`
-                              : `из ${formatMoney(loan.taken)}`}
+                              : `из ${formatMoney(loan.taken > 0 ? loan.taken : loan.amount)}`}
                           </div>
                         </div>
 

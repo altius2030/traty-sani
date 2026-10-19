@@ -2182,13 +2182,21 @@ interface LoanRow {
 
 function withRemaining(rows: LoanRow[]) {
   const today = todayISO();
-  return rows.map((r) => ({
-    ...r,
-    remaining: Math.max(0, r.taken - r.repaid),
-    // Просрочка считается по оставшемуся долгу: погашенный заём тревогу
-    // вызывать не должен даже с датой в прошлом.
-    is_overdue: r.taken - r.repaid > 0.001 && r.date_due < today,
-  }));
+  return rows.map((r) => {
+    // База долга — max(объявлено, поступило), а не только поступило. Займ,
+    // созданный с галочкой «не записывать приход», внесений не имеет вовсе: при
+    // старой формуле он выглядел полностью погашенным, и кнопка «Вернуть» у
+    // него не появлялась.
+    const base = Math.max(r.taken, r.amount);
+    const owed = base - r.repaid;
+    return {
+      ...r,
+      remaining: Math.max(0, owed),
+      // Просрочка считается по оставшемуся долгу: погашенный заём тревогу
+      // вызывать не должен даже с датой в прошлом.
+      is_overdue: owed > 0.001 && r.date_due < today,
+    };
+  });
 }
 
 ipcMain.handle('db:getLoans', () => {
@@ -2301,7 +2309,10 @@ ipcMain.handle(
     run();
 
     const fresh = db!.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(p.id) as LoanRow;
-    return { success: true, remaining: Math.max(0, fresh.taken - fresh.repaid) };
+    return {
+      success: true,
+      remaining: Math.max(0, Math.max(fresh.taken, fresh.amount) - fresh.repaid),
+    };
   }
 );
 
