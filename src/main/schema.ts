@@ -173,6 +173,8 @@ export const SCHEMA_SQL = `
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,
     category_id INTEGER NOT NULL,
+    -- Счёт, куда приходят деньги. NULL = основной счёт (fallback).
+    account_id INTEGER,
     -- Сумма ДО удержания процента платформой
     amount REAL NOT NULL CHECK (amount > 0),
     -- Доля удержания: 0.25 = 25%. Хранится долей, а не процентами,
@@ -184,7 +186,8 @@ export const SCHEMA_SQL = `
     next_date TEXT NOT NULL,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (category_id) REFERENCES deposit_categories(id)
+    FOREIGN KEY (category_id) REFERENCES deposit_categories(id),
+    FOREIGN KEY (account_id) REFERENCES accounts(id)
   );
 
   CREATE INDEX IF NOT EXISTS idx_recurring_income_next
@@ -375,6 +378,18 @@ export function migrateAggregators(database: Database): boolean {
 }
 
 /**
+ * Добавляет account_id в recurring_income — счёт, куда приходят деньги
+ * от агрегатора. Если NULL, используется основной счёт.
+ */
+export function migrateRecurringIncomeAccount(database: Database): boolean {
+  const cols = database.prepare('PRAGMA table_info(recurring_income)').all() as { name: string }[];
+  if (cols.some((c) => c.name === 'account_id')) return false;
+  database.exec(`ALTER TABLE recurring_income ADD COLUMN account_id INTEGER REFERENCES accounts(id)`);
+  console.log('[schema] Добавлена колонка recurring_income.account_id');
+  return true;
+}
+
+/**
  * Снимает NOT NULL с expenses.category_id.
  *
  * С 1.0.22 удаление категории не удаляет траты: они остаются в базе без
@@ -559,6 +574,7 @@ export function applySchema(database: Database): void {
   migrateExpensesNullableCategory(database);
   migrateAccounts(database);
   migrateAggregators(database);
+  migrateRecurringIncomeAccount(database);
 
   // Миграция: уникальность подкатегорий внутри категории.
   // Без этого повторные запуски дублируют дефолтные подкатегории,

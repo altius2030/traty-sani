@@ -1019,10 +1019,11 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
     amount: number;
     categoryId: number;
     date: string;
+    accountId?: number;
   }) => {
     const res = await window.electronAPI.repayLoan({
       ...payload,
-      accountId: selectedAccountId ?? undefined,
+      accountId: payload.accountId ?? selectedAccountId ?? undefined,
     });
     await Promise.all([
       loadLoansAndIncome(),
@@ -1056,6 +1057,7 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
     commissionPercent: number;
     frequency: RecurringFrequency;
     nextDate: string;
+    accountId?: number;
   }) => {
     const res = await window.electronAPI.addRecurringIncome(payload);
     await loadLoansAndIncome();
@@ -1071,6 +1073,7 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
       commissionPercent: number;
       frequency: RecurringFrequency;
       nextDate: string;
+      accountId?: number;
     }
   ) => {
     const res = await window.electronAPI.updateRecurringIncome({ id, ...payload });
@@ -1727,6 +1730,7 @@ const handleOpenReleases = async () => {
           income={recurringIncome}
           depositCategories={depositCategories}
           expenseCategories={categories}
+          accounts={accounts}
           loanDebtTotal={loans.reduce((sum, l) => sum + l.remaining, 0)}
           incomeMonthlyTotal={incomeMonthly}
           onClose={() => setModal(null)}

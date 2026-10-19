@@ -15,6 +15,7 @@ import type {
   LoanItem,
   RecurringFrequency,
   RecurringIncomeItem,
+  AccountBalance,
 } from '../types';
 import { RECURRING_FREQUENCIES, frequencyLabel } from '../types';
 import { formatMoney, toISODate } from '../lib/format';
@@ -149,6 +150,9 @@ interface IncomeForm {
   commission: string;
   frequency: RecurringFrequency;
   nextDate: string;
+  accountId: string;
+  /** Сумма на руки — если заполнено, пересчитывает процент */
+  netAmount?: string;
 }
 
 const emptyIncomeForm = (): IncomeForm => ({
@@ -160,6 +164,7 @@ const emptyIncomeForm = (): IncomeForm => ({
   commission: '',
   frequency: 'weekly',
   nextDate: todayISO(),
+  accountId: '',
 });
 
 export interface LoansIncomeModalProps {
@@ -167,6 +172,7 @@ export interface LoansIncomeModalProps {
   income: RecurringIncomeItem[];
   depositCategories: DepositCategory[];
   expenseCategories: Category[];
+  accounts: AccountBalance[];
   loanDebtTotal: number;
   incomeMonthlyTotal: number;
   onClose: () => void;
@@ -184,6 +190,7 @@ export interface LoansIncomeModalProps {
     amount: number;
     categoryId: number;
     date: string;
+    accountId?: number;
   }) => Promise<void>;
   onDeleteLoan: (id: number) => void;
   onAddIncome: (payload: {
@@ -193,6 +200,7 @@ export interface LoansIncomeModalProps {
     commissionPercent: number;
     frequency: RecurringFrequency;
     nextDate: string;
+    accountId?: number;
   }) => Promise<void>;
   onUpdateIncome: (
     id: number,
@@ -203,6 +211,7 @@ export interface LoansIncomeModalProps {
       commissionPercent: number;
       frequency: RecurringFrequency;
       nextDate: string;
+      accountId?: number;
     }
   ) => Promise<void>;
   onReceiveIncome: (id: number, actualAmount?: number) => void;
@@ -210,7 +219,7 @@ export interface LoansIncomeModalProps {
   onDeleteIncome: (id: number) => void;
 }
 
-type RepayDraft = { id: number; amount: string; categoryId: string; date: string } | null;
+type RepayDraft = { id: number; amount: string; categoryId: string; accountId: string; date: string } | null;
 
 /**
  * Займы и регулярные внесения на одном экране.
@@ -225,6 +234,7 @@ export function LoansIncomeModal({
   income,
   depositCategories,
   expenseCategories,
+  accounts,
   loanDebtTotal,
   incomeMonthlyTotal,
   onClose,
@@ -258,6 +268,10 @@ export function LoansIncomeModal({
   // Первая трата для возврата: категория трат нужна обязательно, а выбирать
   // её каждый раз вручную tiresome — берём первую и даём сменить.
   const defaultExpenseCategoryId = expenseCategories[0]?.id ?? 0;
+
+  // Основной счёт для возврата: берём первый доступный (помеченный is_default)
+  // или первый в списке.
+  const defaultAccountId = accounts.find((a) => a.is_default)?.id ?? accounts[0]?.id ?? 0;
 
   const loanValid =
     loanForm.title.trim() !== '' &&
@@ -317,6 +331,7 @@ export function LoansIncomeModal({
       commissionPercent: incomeCommission,
       frequency: incomeForm.frequency,
       nextDate: incomeForm.nextDate,
+      accountId: incomeForm.accountId === '' ? undefined : Number(incomeForm.accountId),
     };
     try {
       if (editingIncomeId) await onUpdateIncome(editingIncomeId, payload);
@@ -341,6 +356,7 @@ export function LoansIncomeModal({
         amount,
         categoryId: Number(repay.categoryId),
         date: repay.date,
+        accountId: repay.accountId === '' ? undefined : Number(repay.accountId),
       });
       setRepay(null);
     } catch (err) {
@@ -358,6 +374,8 @@ export function LoansIncomeModal({
       commission: String(Math.round(item.commission * 100)),
       frequency: item.frequency,
       nextDate: item.next_date,
+      accountId: item.account_id ? String(item.account_id) : '',
+      netAmount: undefined,
     });
     setIncomeFormOpen(true);
     setError('');
@@ -595,6 +613,31 @@ export function LoansIncomeModal({
                                     </option>
                                   ))}
                                 </select>
+                                {loan.taken === 0 ? (
+                                  <input
+                                    type="hidden"
+                                    value=""
+                                    onChange={() => {}}
+                                  />
+                                ) : (
+                                  <select
+                                    className="li-repay-account"
+                                    value={repay.accountId || ''}
+                                    onChange={(e) =>
+                                      setRepay({
+                                        ...repay,
+                                        accountId: e.target.value === '' ? '' : String(Number(e.target.value)),
+                                      })
+                                    }
+                                  >
+                                    <option value="">— основной счёт —</option>
+                                    {accounts.map((a) => (
+                                      <option key={a.id} value={a.id}>
+                                        {a.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
                                 <input
                                   type="date"
                                   className="li-repay-date"
@@ -627,6 +670,7 @@ export function LoansIncomeModal({
                                     id: loan.id,
                                     amount: String(loan.remaining),
                                     categoryId: String(defaultExpenseCategoryId),
+                                    accountId: loan.taken === 0 ? '' : String(defaultAccountId),
                                     date: todayISO(),
                                   })
                                 }
@@ -743,6 +787,57 @@ export function LoansIncomeModal({
                       value={incomeForm.nextDate}
                       onChange={(e) => setIncomeForm({ ...incomeForm, nextDate: e.target.value })}
                     />
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Счёт для поступления</label>
+                    <select
+                      value={incomeForm.accountId}
+                      onChange={(e) =>
+                        setIncomeForm({
+                          ...incomeForm,
+                          accountId: e.target.value === '' ? '' : String(Number(e.target.value)),
+                        })
+                      }
+                    >
+                      <option value="">— основной счёт —</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Сумма на руки (₸)</label>
+                    <input
+                      type="number"
+                      value={incomeForm.netAmount || ''}
+                      placeholder="Авто (из суммы и %)"
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setIncomeForm({ ...incomeForm, netAmount: val });
+                        // Если ввели сумму на руки, пересчитываем процент
+                        const gross = Number(incomeForm.amount.replace(',', '.'));
+                        const net = Number(val.replace(',', '.'));
+                        if (Number.isFinite(gross) && gross > 0 && Number.isFinite(net) && net > 0) {
+                          const calcCommission = Math.max(0, 1 - net / gross);
+                          setIncomeForm((prev) => ({
+                            ...prev,
+                            commission: String(Math.round(calcCommission * 10000) / 100),
+                          }));
+                        }
+                      }}
+                    />
+                    <div className="field-hint">
+                      Введите сумму, которая придёт на руки — процент посчитается автоматически.
+                      Оставьте пустым, чтобы считать от суммы и процента выше.
+                    </div>
                   </div>
                 </div>
 

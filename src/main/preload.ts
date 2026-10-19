@@ -119,6 +119,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     commissionPercent: number;
     frequency: string;
     nextDate: string;
+    accountId?: number;
   }) => ipcRenderer.invoke('db:addRecurringIncome', item),
   updateRecurringIncome: (item: {
     id: number;
@@ -128,6 +129,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     commissionPercent: number;
     frequency: string;
     nextDate: string;
+    accountId?: number;
   }) => ipcRenderer.invoke('db:updateRecurringIncome', item),
   toggleRecurringIncome: (id: number) => ipcRenderer.invoke('db:toggleRecurringIncome', id),
   deleteRecurringIncome: (id: number) => ipcRenderer.invoke('db:deleteRecurringIncome', id),

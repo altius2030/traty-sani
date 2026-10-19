@@ -232,6 +232,7 @@ export interface ElectronAPI {
     commissionPercent: number;
     frequency: RecurringFrequency;
     nextDate: string;
+    accountId?: number;
   }): Promise<{ id: number; net: number }>;
   updateRecurringIncome(item: {
     id: number;
@@ -241,6 +242,7 @@ export interface ElectronAPI {
     commissionPercent: number;
     frequency: RecurringFrequency;
     nextDate: string;
+    accountId?: number;
   }): Promise<{ success: boolean; net: number }>;
   toggleRecurringIncome(id: number): Promise<{ success: boolean }>;
   deleteRecurringIncome(id: number): Promise<{ success: boolean }>;

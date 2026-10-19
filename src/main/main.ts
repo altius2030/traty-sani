@@ -2300,11 +2300,15 @@ ipcMain.handle(
     const row = db!.prepare(`${LOAN_SELECT} WHERE l.id = ?`).get(p.id) as LoanRow | undefined;
     if (!row) throw new Error('Заём не найден');
 
+    // Если у займа нет внесений (т.е. не записывали приход), счёт не обязателен
+    const hasDeposits = row.taken > 0;
+    const accountId = hasDeposits ? resolveAccount(p.accountId) : null;
+
     const run = db!.transaction(() => {
       db!.prepare(
         `INSERT INTO expenses (category_id, amount, date, note, loan_id, account_id)
          VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(catId, amount, p.date, `Возврат: ${row.title}`, p.id, resolveAccount(p.accountId));
+      ).run(catId, amount, p.date, `Возврат: ${row.title}`, p.id, accountId);
     });
     run();
 
@@ -2353,9 +2357,11 @@ function netIncome(amount: number, commission: number): number {
 }
 
 const RECURRING_INCOME_SELECT = `
-  SELECT r.*, c.name AS category_name, c.color AS category_color
+  SELECT r.*, c.name AS category_name, c.color AS category_color,
+         a.name AS account_name, a.color AS account_color
   FROM recurring_income r
   JOIN deposit_categories c ON r.category_id = c.id
+  LEFT JOIN accounts a ON a.id = r.account_id
 `;
 
 interface RecurringIncomeRow {
@@ -2368,6 +2374,10 @@ interface RecurringIncomeRow {
   next_date: string;
   is_active: number;
   category_name: string;
+  category_color: string | null;
+  account_id: number | null;
+  account_name: string | null;
+  account_color: string | null;
 }
 
 function validateCommission(percent: number): number {
@@ -2405,6 +2415,7 @@ ipcMain.handle(
       commissionPercent: number;
       frequency: RecurringFrequency;
       nextDate: string;
+      accountId?: number;
     }
   ) => {
     const title = (p.title || '').trim();
@@ -2418,10 +2429,15 @@ ipcMain.handle(
     const cat = db!.prepare('SELECT id FROM deposit_categories WHERE id = ?').get(p.categoryId);
     if (!cat) throw new Error('Категория внесения не найдена');
 
+    if (p.accountId) {
+      const acc = db!.prepare('SELECT id FROM accounts WHERE id = ?').get(p.accountId);
+      if (!acc) throw new Error('Счёт не найден');
+    }
+
     const result = db!.prepare(
-      `INSERT INTO recurring_income (title, category_id, amount, commission, frequency, next_date)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(title, p.categoryId, amount, commission, p.frequency, p.nextDate);
+      `INSERT INTO recurring_income (title, category_id, amount, commission, frequency, next_date, account_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(title, p.categoryId, amount, commission, p.frequency, p.nextDate, p.accountId ?? null);
     return { id: Number(result.lastInsertRowid), net: netIncome(amount, commission) };
   }
 );
@@ -2438,6 +2454,7 @@ ipcMain.handle(
       commissionPercent: number;
       frequency: RecurringFrequency;
       nextDate: string;
+      accountId?: number;
     }
   ) => {
     const title = (p.title || '').trim();
@@ -2451,11 +2468,16 @@ ipcMain.handle(
     const cat = db!.prepare('SELECT id FROM deposit_categories WHERE id = ?').get(p.categoryId);
     if (!cat) throw new Error('Категория внесения не найдена');
 
+    if (p.accountId) {
+      const acc = db!.prepare('SELECT id FROM accounts WHERE id = ?').get(p.accountId);
+      if (!acc) throw new Error('Счёт не найден');
+    }
+
     db!.prepare(
       `UPDATE recurring_income
-       SET title = ?, category_id = ?, amount = ?, commission = ?, frequency = ?, next_date = ?
+       SET title = ?, category_id = ?, amount = ?, commission = ?, frequency = ?, next_date = ?, account_id = ?
        WHERE id = ?`
-    ).run(title, p.categoryId, amount, commission, p.frequency, p.nextDate, p.id);
+    ).run(title, p.categoryId, amount, commission, p.frequency, p.nextDate, p.accountId ?? null, p.id);
     return { success: true, net: netIncome(amount, commission) };
   }
 );
@@ -2523,11 +2545,14 @@ ipcMain.handle(
     const withheld = Math.max(0, Math.round((row.amount - net) * 100) / 100);
     const nextDate = advanceUntilFuture(row.next_date, row.frequency, todayISO());
 
+    // Счёт: приоритет — у регулярной выплаты, затем переданный вручную, затем основной
+    const accountId = row.account_id ?? p?.accountId;
+
     const run = db!.transaction(() => {
       db!.prepare(
         `INSERT INTO deposits (amount, date, category_id, note, account_id, commission_amount)
          VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(net, row.next_date, row.category_id, row.title, resolveAccount(p?.accountId), withheld);
+      ).run(net, row.next_date, row.category_id, row.title, resolveAccount(accountId), withheld);
       db!.prepare('UPDATE recurring_income SET next_date = ? WHERE id = ?').run(nextDate, id);
     });
     run();

@@ -249,6 +249,10 @@ export interface RecurringIncomeItem {
   frequency: RecurringFrequency;
   next_date: string;
   is_active: number;
+  /** Счёт, куда приходят деньги. Null = основной счёт */
+  account_id?: number | null;
+  account_name?: string | null;
+  account_color?: string | null;
 }
 
 export interface UpdateStatus {
