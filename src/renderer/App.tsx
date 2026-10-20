@@ -1331,7 +1331,7 @@ const loadRecurringCalendar = useCallback(
         checkpoint: rep.baseCheckpoint,
         expenseRows: rep.expenses.map((e) => ({
           date: e.date,
-          category: e.category_name,
+          category: e.category_name || 'Без категории',
           subcategory: e.subcategory_name || '',
           item: e.subitem_name || '',
           amount: e.amount,
