@@ -1,4 +1,4 @@
-import { Trash2, CalendarDays, FileDown, Plus, Banknote, Receipt, Copy, Search, X } from 'lucide-react';
+import { Trash2, CalendarDays, FileDown, Plus, Banknote, Receipt, Copy, Search, X, Pencil } from 'lucide-react';
 import type { Deposit, Expense, Period, PeriodPreset } from '../types';
 import { formatMoney, getPeriodLabel, toISODate } from '../lib/format';
 import { getCategoryIcon as getCategoryIconDef } from '../lib/icons';
@@ -25,6 +25,9 @@ interface ExpenseTableProps {
   /** Открыть форму траты, предзаполненной выбранной строкой */
   onRepeatExpense: (expense: Expense) => void;
   onRepeatDeposit: (deposit: Deposit) => void;
+  /** Редактирование существующей траты — форма с текущими данными */
+  onEditExpense: (expense: Expense) => void;
+  onEditDeposit: (deposit: Deposit) => void;
   /** Фильтр по таблице: текст и диапазон сумм */
   filter: { text: string; min: string; max: string };
   onFilterChange: (filter: { text: string; min: string; max: string }) => void;
@@ -68,6 +71,8 @@ export default function ExpenseTable({
   onOpenReport,
   onRepeatExpense,
   onRepeatDeposit,
+  onEditExpense,
+  onEditDeposit,
   filter,
   onFilterChange,
   searchRef,
@@ -328,6 +333,13 @@ export default function ExpenseTable({
                         <div className="row-actions">
                           <button
                             className="action-btn"
+                            onClick={() => onEditExpense(expense)}
+                            title="Редактировать трату"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            className="action-btn"
                             onClick={() => onRepeatExpense(expense)}
                             title="Повторить — откроет форму, заполненную этой тратой"
                           >
@@ -440,6 +452,13 @@ export default function ExpenseTable({
                   </td>
                   <td>
                     <div className="row-actions">
+                      <button
+                        className="action-btn"
+                        onClick={() => onEditDeposit(deposit)}
+                        title="Редактировать внесение"
+                      >
+                        <Pencil size={14} />
+                      </button>
                       <button
                         className="action-btn"
                         onClick={() => onRepeatDeposit(deposit)}

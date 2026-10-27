@@ -751,6 +751,37 @@ ipcMain.handle('db:addExpense', (_, expense: { categoryId: number; subcategoryId
 });
 
 /**
+ * Редактирование траты: категория, подкатегория, статья, сумма, дата, счёт.
+ * Всё, кроме id, можно менять. Валидируем так же, как при создании.
+ */
+ipcMain.handle('db:updateExpense', (_, expense: { id: number; categoryId: number; subcategoryId?: number | null; subitemId?: number | null; amount: number; date: string; note?: string | null; accountId?: number }) => {
+  if (!expense.id) throw new Error('Не указан id траты');
+  const existing = db!.prepare('SELECT id FROM expenses WHERE id = ?').get(expense.id);
+  if (!existing) throw new Error('Трата не найдена');
+
+  const accountId = resolveAccount(expense.accountId);
+  const amount = Number(expense.amount);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Сумма траты должна быть больше нуля');
+  if (!expense.categoryId) throw new Error('Выберите категорию');
+
+  db!.prepare(
+    `UPDATE expenses
+     SET category_id = ?, subcategory_id = ?, subitem_id = ?, amount = ?, date = ?, note = ?, account_id = ?
+     WHERE id = ?`
+  ).run(
+    expense.categoryId,
+    expense.subcategoryId || null,
+    expense.subitemId || null,
+    amount,
+    expense.date,
+    expense.note || null,
+    accountId,
+    expense.id
+  );
+  return { success: true, warning: checkBackdated(expense.date) };
+});
+
+/**
  * Приводит переданный счёт к существующему id.
  *
  * Формы иногда присылают пустое или протухшее значение (счёт удалили, пока был
@@ -1084,6 +1115,30 @@ ipcMain.handle('db:addDeposit', (_, deposit: { amount: number; date: string; cat
     category_name: category.name,
     warning: checkBackdated(deposit.date),
   };
+});
+
+/**
+ * Редактирование внесения: категория, сумма, дата, счёт.
+ * Всё, кроме id, можно менять. Валидируем так же, как при создании.
+ */
+ipcMain.handle('db:updateDeposit', (_, deposit: { id: number; amount: number; date: string; categoryId: number; accountId?: number }) => {
+  if (!deposit.id) throw new Error('Не указан id внесения');
+  const existing = db!.prepare('SELECT id FROM deposits WHERE id = ?').get(deposit.id);
+  if (!existing) throw new Error('Внесение не найдено');
+
+  const amount = Number(deposit.amount);
+  const categoryId = Number(deposit.categoryId);
+  if (!Number.isFinite(amount) || amount <= 0) throw new Error('Сумма внесения должна быть больше нуля');
+  if (!Number.isFinite(categoryId) || categoryId <= 0) throw new Error('Выберите категорию внесения');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(deposit.date || '')) throw new Error('Некорректная дата');
+
+  const category = db!.prepare(`SELECT name FROM deposit_categories WHERE id = ?`).get(categoryId) as { name: string } | undefined;
+  if (!category) throw new Error('Категория внесения не найдена');
+
+  db!.prepare(
+    `UPDATE deposits SET amount = ?, date = ?, category_id = ?, account_id = ? WHERE id = ?`
+  ).run(amount, deposit.date, categoryId, resolveAccount(deposit.accountId), deposit.id);
+  return { success: true, category_name: category.name, warning: checkBackdated(deposit.date) };
 });
 
 ipcMain.handle('db:deleteDeposit', (_, id: number) => {

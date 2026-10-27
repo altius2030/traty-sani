@@ -7,6 +7,8 @@ import AddExpenseModal, {
   AddDepositModal,
   CategoryManagerModal,
   ConfirmModal,
+  EditDepositModal,
+  EditExpenseModal,
   UpdateModal,
 } from './components/Modals';
 import ReportModal from './components/ReportModal';
@@ -212,6 +214,8 @@ function App() {
     | { type: 'update' }
     | { type: 'repeatExpense'; expense: Expense }
     | { type: 'repeatDeposit'; deposit: Deposit }
+    | { type: 'editExpense'; expense: Expense }
+    | { type: 'editDeposit'; deposit: Deposit }
     | { type: 'recurring' }
     | { type: 'loans' }
     | { type: 'transfers' }
@@ -602,6 +606,28 @@ useEffect(() => {
     await Promise.all([loadExpenses(period), loadBalances()]);
   };
 
+  const handleUpdateExpense = async (data: {
+    categoryId: number;
+    subcategoryId?: number;
+    subitemId?: number;
+    amount: number;
+    date: string;
+    note?: string;
+    accountId?: number;
+  }) => {
+    if (!modal || modal.type !== 'editExpense') return;
+    const saved = await window.electronAPI.updateExpense({ id: modal.expense.id, ...data });
+    setModal(null);
+    addToast(
+      saved?.warning
+        ? `Трата обновлена, но в остаток не вошла. ${saved.warning}`
+        : 'Трата обновлена',
+      saved?.warning ? 'error' : 'success',
+      saved?.warning ? { duration: 12000 } : undefined
+    );
+    await Promise.all([loadExpenses(period), loadBalances()]);
+  };
+
   const handleAddBalance = async (data: { amount: number; date: string; note?: string }) => {
     await window.electronAPI.addBalance(data);
     setModal(null);
@@ -625,6 +651,26 @@ useEffect(() => {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Не удалось сохранить внесение';
+      addToast(message, 'error');
+    }
+  };
+
+  const handleUpdateDeposit = async (data: { amount: number; date: string; categoryId: number; accountId?: number }) => {
+    if (!modal || modal.type !== 'editDeposit') return;
+    try {
+      const saved = await window.electronAPI.updateDeposit({ id: modal.deposit.id, ...data });
+      setModal(null);
+      const label = saved?.category_name ? ` — ${saved.category_name}` : '';
+      addToast(
+        saved?.warning
+          ? `Внесение обновлено${label}, но в остаток не вошло. ${saved.warning}`
+          : `Внесение обновлено${label}`,
+        saved?.warning ? 'error' : 'success',
+        saved?.warning ? { duration: 12000 } : undefined
+      );
+      await Promise.all([loadExpenses(period), loadBalances()]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Не удалось обновить внесение';
       addToast(message, 'error');
     }
   };
@@ -1591,6 +1637,8 @@ const handleOpenReleases = async () => {
           onOpenReport={handleOpenReport}
           onRepeatExpense={(expense) => setModal({ type: 'repeatExpense', expense })}
           onRepeatDeposit={(deposit) => setModal({ type: 'repeatDeposit', deposit })}
+          onEditExpense={(expense) => setModal({ type: 'editExpense', expense })}
+          onEditDeposit={(deposit) => setModal({ type: 'editDeposit', deposit })}
           filter={tableFilter}
           onFilterChange={setTableFilter}
           searchRef={searchRef}
@@ -1655,6 +1703,29 @@ const handleOpenReleases = async () => {
           }}
           onClose={() => setModal(null)}
           onSubmit={handleAddDeposit}
+          onAddCategory={handleAddDepositCategory}
+        />
+      )}
+
+      {/* Редактирование траты: открывается с текущими данными, дата не меняется сама */}
+      {modal?.type === 'editExpense' && (
+        <EditExpenseModal
+          expense={modal.expense}
+          categories={categories}
+          accounts={accounts}
+          onClose={() => setModal(null)}
+          onSubmit={handleUpdateExpense}
+        />
+      )}
+
+      {/* Редактирование внесения: открывается с текущими данными */}
+      {modal?.type === 'editDeposit' && (
+        <EditDepositModal
+          deposit={modal.deposit}
+          depositCategories={depositCategories}
+          accounts={accounts}
+          onClose={() => setModal(null)}
+          onSubmit={handleUpdateDeposit}
           onAddCategory={handleAddDepositCategory}
         />
       )}

@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   addExpense: (expense: { categoryId: number; subcategoryId?: number; amount: number; date: string; note?: string }) => 
     ipcRenderer.invoke('db:addExpense', expense),
   deleteExpense: (id: number) => ipcRenderer.invoke('db:deleteExpense', id),
+  updateExpense: (expense: { id: number; categoryId: number; subcategoryId?: number | null; subitemId?: number | null; amount: number; date: string; note?: string | null; accountId?: number }) =>
+    ipcRenderer.invoke('db:updateExpense', expense),
   // Возврат удалённой записи для отмены удаления
   restoreExpense: (expense: unknown) => ipcRenderer.invoke('db:restoreExpense', expense),
   restoreDeposit: (deposit: unknown) => ipcRenderer.invoke('db:restoreDeposit', deposit),
@@ -58,6 +60,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('db:getDeposits', { startDate, endDate, accountId }),
   addDeposit: (deposit: { amount: number; date: string; categoryId: number }) =>
     ipcRenderer.invoke('db:addDeposit', deposit),
+  updateDeposit: (deposit: { id: number; amount: number; date: string; categoryId: number; accountId?: number }) =>
+    ipcRenderer.invoke('db:updateDeposit', deposit),
   deleteDeposit: (id: number) => ipcRenderer.invoke('db:deleteDeposit', id),
   getDepositCategories: () => ipcRenderer.invoke('db:getDepositCategories'),
   addDepositCategory: (name: string) => ipcRenderer.invoke('db:addDepositCategory', name),
@@ -164,7 +168,9 @@ declare global {
       deleteSubcategory: (id: number) => Promise<{ success: boolean }>;
       getExpenses: (startDate: string, endDate: string) => Promise<any[]>;
       addExpense: (expense: { categoryId: number; subcategoryId?: number; amount: number; date: string; note?: string }) => Promise<any>;
+      updateExpense: (expense: { id: number; categoryId: number; subcategoryId?: number | null; subitemId?: number | null; amount: number; date: string; note?: string | null; accountId?: number }) => Promise<any>;
       deleteExpense: (id: number) => Promise<{ success: boolean }>;
+      updateDeposit: (deposit: { id: number; amount: number; date: string; categoryId: number; accountId?: number }) => Promise<any>;
       getBalanceHistory: () => Promise<any[]>;
       addBalance: (balance: { amount: number; date: string; note?: string }) => Promise<any>;
       deleteBalance: (id: number) => Promise<{ success: boolean }>;

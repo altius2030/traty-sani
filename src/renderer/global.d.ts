@@ -91,6 +91,17 @@ export interface ElectronAPI {
     note?: string;
   }): Promise<any>;
   deleteExpense(id: number): Promise<{ success: boolean }>;
+  /** Редактирование траты: категория, подкатегория, статья, сумма, дата, счёт */
+  updateExpense(expense: {
+    id: number;
+    categoryId: number;
+    subcategoryId?: number | null;
+    subitemId?: number | null;
+    amount: number;
+    date: string;
+    note?: string | null;
+    accountId?: number;
+  }): Promise<{ success: boolean; warning?: string }>;
   /** Возвращает удалённую трату с прежним id — для отмены удаления */
   restoreExpense(expense: Expense): Promise<{ success: boolean }>;
   restoreDeposit(deposit: Deposit): Promise<{ success: boolean }>;
@@ -157,6 +168,14 @@ export interface ElectronAPI {
     warning?: string | null;
   }>;
   deleteDeposit(id: number): Promise<{ success: boolean }>;
+  /** Редактирование внесения: категория, сумма, дата, счёт */
+  updateDeposit(deposit: {
+    id: number;
+    amount: number;
+    date: string;
+    categoryId: number;
+    accountId?: number;
+  }): Promise<{ success: boolean; category_name?: string; warning?: string }>;
   getDepositCategories(): Promise<DepositCategory[]>;
   addDepositCategory(name: string): Promise<{ id: number; name: string }>;
   deleteDepositCategory(id: number): Promise<{ success: boolean; deletedDeposits: number }>;

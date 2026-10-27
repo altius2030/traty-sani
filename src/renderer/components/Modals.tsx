@@ -526,6 +526,395 @@ export function AddDepositModal({
   );
 }
 
+/**
+ * Редактирование существующей траты. Форма открывается с текущими данными записи;
+ * дата не принудительно меняется на сегодняшнюю — это осознанное редактирование.
+ */
+export function EditExpenseModal({
+  expense,
+  categories,
+  accounts = [],
+  onClose,
+  onSubmit,
+}: {
+  expense: import('../types').Expense;
+  categories: Category[];
+  accounts?: AccountBalance[];
+  onClose: () => void;
+  onSubmit: (data: { categoryId: number; subcategoryId?: number; subitemId?: number; amount: number; date: string; note?: string; accountId?: number }) => void;
+}) {
+  const defaultAccountId = expense.account_id ?? accounts.find((a) => a.is_default === 1)?.id ?? accounts[0]?.id ?? '';
+  const [accountId, setAccountId] = useState<number | ''>(defaultAccountId ?? '');
+  const [categoryId, setCategoryId] = useState<number>(expense.category_id ?? categories[0]?.id ?? 0);
+  const [subcategoryId, setSubcategoryId] = useState<number | ''>(expense.subcategory_id ?? '');
+  const [subitemId, setSubitemId] = useState<number | ''>(expense.subitem_id ?? '');
+  const [amount, setAmount] = useState(String(expense.amount ?? ''));
+  const [date, setDate] = useState(expense.date ?? toISODate(new Date()));
+  const [note, setNote] = useState(expense.note ?? '');
+
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) { firstRender.current = false; return; }
+    setSubcategoryId('');
+    setSubitemId('');
+  }, [categoryId]);
+
+  const selectedCategory = categories.find((c) => c.id === categoryId);
+  const subcategories: Subcategory[] = Array.isArray(selectedCategory?.subcategories)
+    ? (selectedCategory?.subcategories as Subcategory[])
+    : [];
+  const selectedSub = subcategories.find((s) => s.id === subcategoryId);
+  const subitems: Subitem[] = Array.isArray(selectedSub?.items)
+    ? (selectedSub?.items as Subitem[])
+    : [];
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const amountNum = parseFloat(amount.replace(',', '.'));
+    if (!categoryId || isNaN(amountNum) || amountNum <= 0) return;
+    onSubmit({
+      categoryId,
+      subcategoryId: subcategoryId ? Number(subcategoryId) : undefined,
+      subitemId: subitemId ? Number(subitemId) : undefined,
+      amount: amountNum,
+      date,
+      note: note.trim() || undefined,
+      accountId: accountId === '' ? undefined : Number(accountId),
+    });
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Редактировать трату</h2>
+          <button className="modal-close" onClick={onClose} aria-label="Закрыть">
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <label className="form-label" htmlFor="edit-expense-category">
+              Категория
+            </label>
+            <div className="select-wrapper">
+              <select
+                id="edit-expense-category"
+                value={categoryId}
+                onChange={(e) => setCategoryId(Number(e.target.value))}
+              >
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {subcategories.length > 0 && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-expense-subcategory">
+                Подкатегория
+              </label>
+              <div className="select-wrapper">
+                <select
+                  id="edit-expense-subcategory"
+                  value={subcategoryId}
+                  onChange={(e) => setSubcategoryId(e.target.value ? Number(e.target.value) : '')}
+                >
+                  <option value="">Без подкатегории</option>
+                  {subcategories.map((sub) => (
+                    <option key={sub.id} value={sub.id}>{sub.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {subitems.length > 0 && (
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-expense-subitem">
+                Статья
+              </label>
+              <div className="select-wrapper">
+                <select
+                  id="edit-expense-subitem"
+                  value={subitemId}
+                  onChange={(e) => setSubitemId(e.target.value ? Number(e.target.value) : '')}
+                >
+                  <option value="">Без статьи</option>
+                  {subitems.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-expense-amount">
+                Сумма (₸)
+              </label>
+              <input
+                id="edit-expense-amount"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-expense-date">
+                Дата
+              </label>
+              <input
+                id="edit-expense-date"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-expense-account">
+                Счёт
+              </label>
+              <select
+                id="edit-expense-account"
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value === '' ? '' : Number(e.target.value))}
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name} — {formatMoney(a.balance)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="edit-expense-note">
+              Комментарий (необязательно)
+            </label>
+            <input
+              id="edit-expense-note"
+              type="text"
+              placeholder="Дополнительная информация..."
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              maxLength={200}
+            />
+          </div>
+
+          <div className="modal-footer">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Отмена
+            </button>
+            <button type="submit" className="btn btn-primary">
+              <Check size={18} />
+              Сохранить
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Редактирование существующего внесения. Форма открывается с текущими данными.
+ */
+export function EditDepositModal({
+  deposit,
+  depositCategories,
+  accounts = [],
+  onClose,
+  onSubmit,
+  onAddCategory,
+}: {
+  deposit: import('../types').Deposit;
+  depositCategories: DepositCategory[];
+  accounts?: AccountBalance[];
+  onClose: () => void;
+  onSubmit: (data: { amount: number; date: string; categoryId: number; accountId?: number }) => void;
+  onAddCategory: (name: string) => Promise<{ id: number; name: string }>;
+}) {
+  const defaultAccountId = deposit.account_id ?? accounts.find((a) => a.is_default === 1)?.id ?? accounts[0]?.id ?? '';
+  const [accountId, setAccountId] = useState<number | ''>(defaultAccountId ?? '');
+  const [amount, setAmount] = useState(String(deposit.amount ?? ''));
+  const [date, setDate] = useState(deposit.date ?? toISODate(new Date()));
+  const [categoryId, setCategoryId] = useState<number | ''>(deposit.category_id ?? '');
+  const [categoryTouched, setCategoryTouched] = useState(false);
+  const [newCategory, setNewCategory] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
+
+  const amountNum = parseFloat(amount.replace(',', '.'));
+  const amountValid = Number.isFinite(amountNum) && amountNum > 0;
+  const categoryValid = categoryId !== '' && categoryId != null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!amountValid || !categoryValid) return;
+    onSubmit({
+      amount: amountNum,
+      date,
+      categoryId: Number(categoryId),
+      accountId: accountId === '' ? undefined : Number(accountId),
+    });
+  };
+
+  const handleCreateCategory = async () => {
+    const name = newCategory.trim();
+    if (!name) return;
+    setCreating(true);
+    setError('');
+    try {
+      const created = await onAddCategory(name);
+      setCategoryId(created.id);
+      setNewCategory('');
+      setCategoryTouched(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось создать категорию');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Редактировать внесение</h2>
+          <button className="modal-close" onClick={onClose} aria-label="Закрыть">
+            <X size={20} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-deposit-amount">
+                Сумма (₸) <span style={{ color: 'var(--accent-danger)' }}>*</span>
+              </label>
+              <input
+                id="edit-deposit-amount"
+                type="number"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-deposit-date">
+                Дата <span style={{ color: 'var(--accent-danger)' }}>*</span>
+              </label>
+              <input
+                id="edit-deposit-date"
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                required
+              />
+            </div>
+          </div>
+
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label" htmlFor="edit-deposit-account">
+                Счёт
+              </label>
+              <select
+                id="edit-deposit-account"
+                value={accountId}
+                onChange={(e) => setAccountId(e.target.value === '' ? '' : Number(e.target.value))}
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name} — {formatMoney(a.balance)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="edit-deposit-category">
+              Категория внесения <span style={{ color: 'var(--accent-danger)' }}>*</span>
+            </label>
+            {depositCategories.length > 0 ? (
+              <div className="select-wrapper">
+                <select
+                  id="edit-deposit-category"
+                  value={categoryId}
+                  onChange={(e) => {
+                    setCategoryId(e.target.value ? Number(e.target.value) : '');
+                    if (categoryTouched) setError('');
+                  }}
+                  onBlur={() => setCategoryTouched(true)}
+                  required
+                >
+                  <option value="">Выберите категорию…</option>
+                  {depositCategories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="field-hint" style={{ marginBottom: 8 }}>
+                Категорий пока нет — создайте первую.
+              </div>
+            )}
+            {categoryTouched && !categoryValid && (
+              <div className="field-error">Выберите категорию внесения</div>
+            )}
+
+            <form
+              className="inline-create"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleCreateCategory();
+              }}
+            >
+              <input
+                type="text"
+                placeholder="+ Новая категория"
+                value={newCategory}
+                onChange={(e) => setNewCategory(e.target.value)}
+              />
+              <button type="submit" className="btn btn-secondary" disabled={creating}>
+                {creating ? 'Создание…' : 'Добавить'}
+              </button>
+            </form>
+            {error && <div className="field-error">{error}</div>}
+          </div>
+
+          <div className="modal-footer">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>
+              Отмена
+            </button>
+            <button type="submit" className="btn btn-deposit" disabled={!amountValid || !categoryValid}>
+              <Check size={18} />
+              Сохранить
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 interface AddBalanceModalProps {
   onClose: () => void;
   onSubmit: (data: { amount: number; date: string; note?: string; accountId?: number }) => void;
