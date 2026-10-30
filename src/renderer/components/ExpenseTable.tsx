@@ -35,6 +35,10 @@ interface ExpenseTableProps {
   searchRef: React.RefObject<HTMLInputElement>;
   /** Сколько записей скрыто текущим фильтром */
   hiddenCount: number;
+  /** Рабочая дата — подставляется по умолчанию в формы трат и внесений */
+  workingDate: string;
+  onWorkingDateChange: (date: string) => void;
+  onWorkingDateToday: () => void;
 }
 
 const PRESETS: { key: PeriodPreset; label: string }[] = [
@@ -73,6 +77,9 @@ export default function ExpenseTable({
   onRepeatDeposit,
   onEditExpense,
   onEditDeposit,
+  workingDate,
+  onWorkingDateChange,
+  onWorkingDateToday,
   filter,
   onFilterChange,
   searchRef,
@@ -158,6 +165,28 @@ export default function ExpenseTable({
             style={{ width: 145 }}
             max={toISODate(new Date())}
           />
+        </div>
+
+        {/* Рабочая дата: подставляется по умолчанию в формы трат и внесений.
+           Пользователь ставит «вчера» один раз — и все формы открываются с ней.
+           Кнопка «Сегодня» возвращает к текущей дате. */}
+        <div className="working-date" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <CalendarDays size={14} style={{ color: 'var(--text-muted)' }} />
+          <input
+            type="date"
+            value={workingDate}
+            onChange={(e) => onWorkingDateChange(e.target.value)}
+            aria-label="Дата заполнения"
+            style={{ width: 145 }}
+          />
+          <button
+            className="btn btn-ghost"
+            style={{ padding: '4px 8px', fontSize: 12 }}
+            onClick={onWorkingDateToday}
+            title="Сегодня"
+          >
+            Сегодня
+          </button>
         </div>
       </div>
 

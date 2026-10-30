@@ -814,6 +814,22 @@ input::placeholder {
   padding: 8px 12px;
 }
 
+/* Рабочая дата — календарь для быстрого выбора дня заполнения. Все формы
+   трат и внесений открываются с этой датой, не с сегодняшней. */
+.working-date {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+}
+
+.working-date input[type="date"] {
+  font-size: 13px;
+}
+
 .period-btn {
   padding: 6px 12px;
   border-radius: 6px;

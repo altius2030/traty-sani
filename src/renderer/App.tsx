@@ -44,6 +44,7 @@ import {
   getPeriodLabel,
   getPresetPeriod,
   parseCategoriesSubcategories,
+  toISODate,
 } from './lib/format';
 
 /**
@@ -170,6 +171,29 @@ function App() {
   // набора поле не должно прыгать, а пустая строка — это «без ограничения»
   const [tableFilter, setTableFilter] = useState({ text: '', min: '', max: '' });
   const searchRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * «Рабочая дата» — дата, которая подставляется по умолчанию в формы трат и
+   * внесений. Пользователь один раз ставит «вчера» — и все формы открываются с
+   * этой датой. Сохраняется в localStorage, чтобы не сбрасывалась при перезапуске.
+   */
+  const WORKING_DATE_KEY = 'traty-sani:workingDate';
+  const [workingDate, setWorkingDate] = useState<string>(() => {
+    try {
+      return localStorage.getItem(WORKING_DATE_KEY) || toISODate(new Date());
+    } catch {
+      return toISODate(new Date());
+    }
+  });
+  const handleWorkingDateChange = useCallback((date: string) => {
+    setWorkingDate(date);
+    try { localStorage.setItem(WORKING_DATE_KEY, date); } catch { /* ignore */ }
+  }, []);
+  const handleWorkingDateToday = useCallback(() => {
+    const today = toISODate(new Date());
+    setWorkingDate(today);
+    try { localStorage.setItem(WORKING_DATE_KEY, today); } catch { /* ignore */ }
+  }, []);
 
   // ——— Регулярные платежи ———
   const [recurring, setRecurring] = useState<RecurringItem[]>([]);
@@ -1639,6 +1663,9 @@ const handleOpenReleases = async () => {
           onRepeatDeposit={(deposit) => setModal({ type: 'repeatDeposit', deposit })}
           onEditExpense={(expense) => setModal({ type: 'editExpense', expense })}
           onEditDeposit={(deposit) => setModal({ type: 'editDeposit', deposit })}
+          workingDate={workingDate}
+          onWorkingDateChange={handleWorkingDateChange}
+          onWorkingDateToday={handleWorkingDateToday}
           filter={tableFilter}
           onFilterChange={setTableFilter}
           searchRef={searchRef}
@@ -1655,6 +1682,7 @@ const handleOpenReleases = async () => {
           preselectedCategoryId={modal.categoryId}
           preselectedSubcategoryId={modal.subcategoryId}
           preselectedSubitemId={modal.subitemId}
+          defaultDate={workingDate}
           onClose={() => setModal(null)}
           onSubmit={handleAddExpense}
         />
@@ -1667,6 +1695,7 @@ const handleOpenReleases = async () => {
           accounts={accounts}
           preselectedAccountId={selectedAccountId}
           preselectedCategoryId={modal.expense.category_id}
+          defaultDate={workingDate}
           prefill={{
             amount: modal.expense.amount,
             note: modal.expense.note,
@@ -1684,6 +1713,7 @@ const handleOpenReleases = async () => {
           depositCategories={depositCategories}
           accounts={accounts}
           preselectedAccountId={selectedAccountId}
+          defaultDate={workingDate}
           onClose={() => setModal(null)}
           onSubmit={handleAddDeposit}
           onAddCategory={handleAddDepositCategory}
@@ -1696,6 +1726,7 @@ const handleOpenReleases = async () => {
           depositCategories={depositCategories}
           accounts={accounts}
           preselectedAccountId={selectedAccountId}
+          defaultDate={workingDate}
           prefill={{
             amount: modal.deposit.amount,
             categoryId: modal.deposit.category_id,

@@ -46,6 +46,11 @@ interface AddExpenseModalProps {
   accounts?: AccountBalance[];
   /** Счёт, выбранный в боковой панели — форма его подхватит */
   preselectedAccountId?: number | null;
+  /**
+   * Рабочая дата — подставляется в поле даты по умолчанию. Позволяет заполнять
+   * данные за один и тот же день, не выбирая дату каждый раз заново.
+   */
+  defaultDate?: string;
   onClose: () => void;
   onSubmit: (data: {
     categoryId: number;
@@ -66,6 +71,7 @@ export default function AddExpenseModal({
   prefill,
   accounts = [],
   preselectedAccountId,
+  defaultDate,
   onClose,
   onSubmit,
 }: AddExpenseModalProps) {
@@ -85,7 +91,7 @@ export default function AddExpenseModal({
   const [amount, setAmount] = useState(
     prefill?.amount != null ? String(prefill.amount) : ''
   );
-  const [date, setDate] = useState(toISODate(new Date()));
+  const [date, setDate] = useState(defaultDate || toISODate(new Date()));
   const [note, setNote] = useState(prefill?.note ?? '');
   const [subitemId, setSubitemId] = useState<number | ''>(
     preselectedSubitemId ?? prefill?.subitemId ?? ''
@@ -309,6 +315,11 @@ interface AddDepositModalProps {
   prefill?: { amount?: number | null; categoryId?: number | null; accountId?: number | null };
   accounts?: AccountBalance[];
   preselectedAccountId?: number | null;
+  /**
+   * Рабочая дата — подставляется в поле даты по умолчанию. Позволяет заполнять
+   * данные за один и тот же день, не выбирая дату каждый раз заново.
+   */
+  defaultDate?: string;
 }
 
 /**
@@ -324,6 +335,7 @@ export function AddDepositModal({
   prefill,
   accounts = [],
   preselectedAccountId,
+  defaultDate,
 }: AddDepositModalProps) {
   const [accountId, setAccountId] = useState<number | ''>(
     preselectedAccountId ??
@@ -335,7 +347,7 @@ export function AddDepositModal({
   const [amount, setAmount] = useState(
     prefill?.amount != null ? String(prefill.amount) : ''
   );
-  const [date, setDate] = useState(toISODate(new Date()));
+  const [date, setDate] = useState(defaultDate || toISODate(new Date()));
   const [categoryId, setCategoryId] = useState<number | ''>(prefill?.categoryId ?? '');
   const [categoryTouched, setCategoryTouched] = useState(false);
   const [newCategory, setNewCategory] = useState('');
