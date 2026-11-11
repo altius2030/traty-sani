@@ -141,7 +141,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('db:receiveRecurringIncome', id, p),
   getRecurringIncomeMonthlyTotal: () => ipcRenderer.invoke('db:getRecurringIncomeMonthlyTotal'),
   
-  getReport: (startDate: string, endDate: string) => ipcRenderer.invoke('db:getReport', { startDate, endDate }),
+  getReport: (startDate: string, endDate: string, accountId?: number | null) => ipcRenderer.invoke('db:getReport', { startDate, endDate, accountId }),
   saveFile: (defaultPath: string, content: string) => ipcRenderer.invoke('dialog:saveFile', defaultPath, content),
 
   // ——— Обновление приложения ———
@@ -174,7 +174,7 @@ declare global {
       getBalanceHistory: () => Promise<any[]>;
       addBalance: (balance: { amount: number; date: string; note?: string }) => Promise<any>;
       deleteBalance: (id: number) => Promise<{ success: boolean }>;
-      getReport: (startDate: string, endDate: string) => Promise<any>;
+      getReport: (startDate: string, endDate: string, accountId?: number | null) => Promise<any>;
       saveFile: (defaultPath: string, content: string) => Promise<{ success: boolean; path?: string }>;
     };
   }

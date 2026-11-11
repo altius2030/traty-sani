@@ -909,12 +909,14 @@ ipcMain.handle('db:restoreExpense', (_, expense: RestorableExpense) => {
  * игнорировалась бы — пользователь поставил остаток 100 000, внёс 50 000
  * в тот же день, а остаток не изменился бы.
  */
-function getDerivedBalanceAt(dateStr: string): {
+function getDerivedBalanceAt(dateStr: string, accountId?: number | null): {
   balance: number;
   base: number;
   baseDate: string | null;
 } {
-  const accounts = db!.prepare('SELECT id FROM accounts ORDER BY id').all() as { id: number }[];
+  const accounts = accountId
+    ? [{ id: accountId }]
+    : (db!.prepare('SELECT id FROM accounts ORDER BY id').all() as { id: number }[]);
 
   // Считаем по каждому счёту отдельно и складываем. Отметка «Указать остаток»
   // принадлежит счёту, а не всей базе: отметка от 1-го на «Карте» не должна
@@ -1178,7 +1180,7 @@ ipcMain.handle('db:restoreDeposit', (_, deposit: RestorableDeposit) => {
   return { success: true };
 });
 
-ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; endDate: string }) => {
+ipcMain.handle('db:getReport', (_, { startDate, endDate, accountId }: { startDate: string; endDate: string; accountId?: number | null }) => {
   // Отметка «Указать остаток» — жёсткий сброс базы. Если она попадает ВНУТРЬ
   // периода, именно она становится началом отсчёта: операции до неё уже учтены
   // в её сумме, иначе они посчитались бы дважды, а карточки отчёта не сошлись бы.
@@ -1186,9 +1188,10 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
     SELECT amount, date(date) AS d, created_at AS ca
     FROM balance_history
     WHERE date(date) BETWEEN date(?) AND date(?)
+      ${accountId ? 'AND account_id = ?' : ''}
     ORDER BY date(date) DESC, created_at DESC
     LIMIT 1
-  `).get(startDate, endDate) as
+  `).get(...(accountId ? [startDate, endDate, accountId] : [startDate, endDate])) as
     | { amount: number; d: string; ca: string }
     | undefined;
 
@@ -1238,37 +1241,49 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate }: { startDate: string; 
   if (cpInPeriod) {
     startAmount = cpInPeriod.amount;
     baseCheckpoint = { amount: cpInPeriod.amount, date: cpInPeriod.d };
+    const accountFilter = accountId ? 'AND e.account_id = ?' : '';
+    const accountParams = accountId ? [cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate, accountId] : [cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate];
     expenses = db!.prepare(
       `${EXPENSE_SELECT}
        WHERE ${AFTER_CP}
          AND e.loan_id IS NULL
+         ${accountFilter}
        ORDER BY date(e.date) DESC`
-    ).all(cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate) as typeof expenses;
+    ).all(...accountParams) as typeof expenses;
+    const depAccountFilter = accountId ? 'AND d.account_id = ?' : '';
+    const depAccountParams = accountId ? [cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate, accountId] : [cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate];
     deposits = db!.prepare(
       `${DEPOSIT_SELECT} WHERE ${DEPOSIT_AFTER_CP}
          AND d.loan_id IS NULL
+         ${depAccountFilter}
        ORDER BY date(d.date) DESC, d.created_at DESC`
-    ).all(cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate) as typeof deposits;
+    ).all(...depAccountParams) as typeof deposits;
   } else {
-    const start = getDerivedBalanceAt(previousDayISO(startDate));
+    const start = getDerivedBalanceAt(previousDayISO(startDate), accountId);
     startAmount = start.balance;
     baseCheckpoint = { amount: start.base, date: start.baseDate };
+    const accountFilter = accountId ? 'AND e.account_id = ?' : '';
+    const accountParams = accountId ? [startDate, endDate, accountId] : [startDate, endDate];
     expenses = db!.prepare(
       `${EXPENSE_SELECT}
        WHERE date(e.date) BETWEEN date(?) AND date(?)
          AND e.loan_id IS NULL
+         ${accountFilter}
        ORDER BY date(e.date) DESC`
-    ).all(startDate, endDate) as typeof expenses;
+    ).all(...accountParams) as typeof expenses;
+    const depAccountFilter = accountId ? 'AND d.account_id = ?' : '';
+    const depAccountParams = accountId ? [startDate, endDate, accountId] : [startDate, endDate];
     deposits = db!.prepare(
       `${DEPOSIT_SELECT}
        WHERE date(d.date) BETWEEN date(?) AND date(?)
          AND d.loan_id IS NULL
+         ${depAccountFilter}
        ORDER BY date(d.date) DESC, d.created_at DESC`
-    ).all(startDate, endDate) as typeof deposits;
+    ).all(...depAccountParams) as typeof deposits;
   }
 
   // Остаток на конец периода — производный, включает все операции периода
-  const end = getDerivedBalanceAt(endDate);
+  const end = getDerivedBalanceAt(endDate, accountId);
 
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
   const totalDeposits = deposits.reduce((sum, d) => sum + d.amount, 0);

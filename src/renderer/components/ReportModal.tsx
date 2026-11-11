@@ -11,15 +11,17 @@ import {
   Sheet,
   HandCoins,
 } from 'lucide-react';
-import type { Period, Report } from '../types';
+import type { Period, Report, AccountBalance } from '../types';
 import { formatMoney, getPeriodLabel } from '../lib/format';
 import { depositColorMap, expenseColorMap } from '../lib/reportColors';
 
 interface ReportModalProps {
   period: Period;
+  accounts: AccountBalance[];
+  defaultAccountId: number | null;
   onClose: () => void;
-  onExport: (report: Report, period: Period) => void;
-  onExportXlsx: (report: Report, period: Period) => void;
+  onExport: (report: Report, period: Period, accountName?: string) => void;
+  onExportXlsx: (report: Report, period: Period, accountName?: string) => void;
 }
 
 type ReportTab = 'all' | 'expenses' | 'deposits';
@@ -30,9 +32,10 @@ const TABS: { id: ReportTab; label: string }[] = [
   { id: 'deposits', label: 'Внесения' },
 ];
 
-export default function ReportModal({ period, onClose, onExport, onExportXlsx }: ReportModalProps) {
+export default function ReportModal({ period, accounts, defaultAccountId, onClose, onExport, onExportXlsx }: ReportModalProps) {
   const [report, setReport] = useState<Report | null>(null);
   const [tab, setTab] = useState<ReportTab>('all');
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(defaultAccountId);
 
   // Точки в таблицах берут те же цвета, что и сектора диаграмм
   const expenseColors = report ? expenseColorMap(report) : {};
@@ -43,7 +46,7 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
     let cancelled = false;
     setLoading(true);
     window.electronAPI
-      .getReport(period.startDate, period.endDate)
+      .getReport(period.startDate, period.endDate, selectedAccountId)
       .then((data: Report) => {
         if (!cancelled) {
           setReport(data);
@@ -57,7 +60,7 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
     return () => {
       cancelled = true;
     };
-  }, [period.startDate, period.endDate]);
+  }, [period.startDate, period.endDate, selectedAccountId]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -93,6 +96,28 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
               </button>
             ))}
           </div>
+
+          {/* Счёт для отчёта: по умолчанию — основной счёт, но можно выбрать
+              любой другой. Отчёт строится по операциям выбранного счёта,
+              а не по всем счетам вместе. */}
+          {accounts.length > 0 && (
+            <div className="report-account">
+              <label className="form-label" htmlFor="report-account" style={{ marginRight: 8 }}>
+                Счёт
+              </label>
+              <select
+                id="report-account"
+                value={selectedAccountId ?? ''}
+                onChange={(e) => setSelectedAccountId(e.target.value ? Number(e.target.value) : null)}
+              >
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} — {formatMoney(a.balance)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -615,11 +640,11 @@ export default function ReportModal({ period, onClose, onExport, onExportXlsx }:
               <button className="btn btn-ghost" onClick={onClose}>
                 Закрыть
               </button>
-              <button className="btn btn-secondary" onClick={() => onExportXlsx(report, period)}>
+              <button className="btn btn-secondary" onClick={() => onExportXlsx(report, period, accounts.find(a => a.id === selectedAccountId)?.name)}>
                 <Sheet size={18} />
                 Экспорт в Excel
               </button>
-              <button className="btn btn-primary" onClick={() => onExport(report, period)}>
+              <button className="btn btn-primary" onClick={() => onExport(report, period, accounts.find(a => a.id === selectedAccountId)?.name)}>
                 <FileDown size={18} />
                 Экспорт в CSV
               </button>

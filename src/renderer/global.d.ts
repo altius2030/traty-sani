@@ -283,7 +283,7 @@ export interface ElectronAPI {
   getUpdateStatus(): Promise<UpdateStatus>;
   openReleasePage(): Promise<{ success: boolean }>;
   onUpdateStatus(cb: (status: UpdateStatus) => void): () => void;
-  getReport(startDate: string, endDate: string): Promise<any>;
+  getReport(startDate: string, endDate: string, accountId?: number | null): Promise<any>;
   saveFile(
     defaultPath: string,
     content: string

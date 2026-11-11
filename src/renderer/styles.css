@@ -2321,6 +2321,23 @@ input::placeholder {
   border-bottom: 1px solid var(--border-color);
 }
 
+/* Счёт для отчёта — рядом с вкладками. По умолчанию выбран основной счёт. */
+.report-account {
+  display: flex;
+  align-items: center;
+  margin: -4px 0 16px;
+}
+
+.report-account select {
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  max-width: 280px;
+}
+
 .report-tab {
   display: flex;
   align-items: center;
