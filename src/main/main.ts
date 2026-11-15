@@ -1180,7 +1180,7 @@ ipcMain.handle('db:restoreDeposit', (_, deposit: RestorableDeposit) => {
   return { success: true };
 });
 
-ipcMain.handle('db:getReport', (_, { startDate, endDate, accountId }: { startDate: string; endDate: string; accountId?: number | null }) => {
+ipcMain.handle('db:getReport', (_, { startDate, endDate, accountId, categoryId }: { startDate: string; endDate: string; accountId?: number | null; categoryId?: number | null }) => {
   // Отметка «Указать остаток» — жёсткий сброс базы. Если она попадает ВНУТРЬ
   // периода, именно она становится началом отсчёта: операции до неё уже учтены
   // в её сумме, иначе они посчитались бы дважды, а карточки отчёта не сошлись бы.
@@ -1242,12 +1242,20 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate, accountId }: { startDat
     startAmount = cpInPeriod.amount;
     baseCheckpoint = { amount: cpInPeriod.amount, date: cpInPeriod.d };
     const accountFilter = accountId ? 'AND e.account_id = ?' : '';
-    const accountParams = accountId ? [cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate, accountId] : [cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate];
+    // -1 — особый случай «Без категории»: у таких записей category_id IS NULL.
+    // Обычный id — конкретная категория.
+    const catFilter = categoryId === -1 ? 'AND e.category_id IS NULL' : categoryId ? 'AND e.category_id = ?' : '';
+    const accountParams = [
+      cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate,
+      ...(accountId ? [accountId] : []),
+      ...(categoryId && categoryId !== -1 ? [categoryId] : []),
+    ];
     expenses = db!.prepare(
       `${EXPENSE_SELECT}
        WHERE ${AFTER_CP}
          AND e.loan_id IS NULL
          ${accountFilter}
+         ${catFilter}
        ORDER BY date(e.date) DESC`
     ).all(...accountParams) as typeof expenses;
     const depAccountFilter = accountId ? 'AND d.account_id = ?' : '';
@@ -1263,12 +1271,18 @@ ipcMain.handle('db:getReport', (_, { startDate, endDate, accountId }: { startDat
     startAmount = start.balance;
     baseCheckpoint = { amount: start.base, date: start.baseDate };
     const accountFilter = accountId ? 'AND e.account_id = ?' : '';
-    const accountParams = accountId ? [startDate, endDate, accountId] : [startDate, endDate];
+    const catFilter = categoryId === -1 ? 'AND e.category_id IS NULL' : categoryId ? 'AND e.category_id = ?' : '';
+    const accountParams = [
+      startDate, endDate,
+      ...(accountId ? [accountId] : []),
+      ...(categoryId && categoryId !== -1 ? [categoryId] : []),
+    ];
     expenses = db!.prepare(
       `${EXPENSE_SELECT}
        WHERE date(e.date) BETWEEN date(?) AND date(?)
          AND e.loan_id IS NULL
          ${accountFilter}
+         ${catFilter}
        ORDER BY date(e.date) DESC`
     ).all(...accountParams) as typeof expenses;
     const depAccountFilter = accountId ? 'AND d.account_id = ?' : '';
@@ -1394,6 +1408,12 @@ const openLoanDebt = loans.reduce((sum, l) => sum + l.remaining, 0);
     byCategory,
     byDepositCategory,
     period: { startDate, endDate },
+    /**
+     * Отчёт отфильтрован по категории трат. Тогда остатки и движение денег
+     * теряют смысл: они считаются по всем операциям, а траты в выборке
+     * только частичные. Фронт по этому флагу прячет балансовые блоки.
+     */
+    categoryFiltered: Boolean(categoryId),
   };
 });
 

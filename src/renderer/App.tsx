@@ -1268,11 +1268,12 @@ const loadRecurringCalendar = useCallback(
     setModal({ type: 'report' });
   };
 
-  const handleExport = async (rep: Report, p: Period, accountName?: string) => {
+  const handleExport = async (rep: Report, p: Period, accountName?: string, categoryName?: string) => {
     const lines: string[] = [];
     lines.push('Отчёт по расходам');
     lines.push(`Период: ${p.startDate} — ${p.endDate}`);
     if (accountName) lines.push(`Счёт: ${accountName}`);
+    if (categoryName) lines.push(`Категория: ${categoryName}`);
     lines.push('');
     lines.push(`На начало периода: ${rep.startBalance.toFixed(2)} ₸`);
     lines.push(`Внесения за период: ${rep.totalDeposits.toFixed(2)} ₸`);
@@ -1359,9 +1360,10 @@ const loadRecurringCalendar = useCallback(
   };
 
   // ——— Экспорт в Excel с нативными графиками ———
-  const handleExportXlsx = async (rep: Report, p: Period, accountName?: string) => {
+  const handleExportXlsx = async (rep: Report, p: Period, accountName?: string, categoryName?: string) => {
     try {
       const accountLabel = accountName ? ` — ${accountName}` : '';
+      const categoryLabel = categoryName ? ` — ${categoryName}` : '';
       const byDayMap = new Map<string, { label: string; expense: number; deposit: number }>();
       for (const e of rep.expenses) {
         const label = new Date(e.date).toLocaleDateString('ru-RU', {
@@ -1389,7 +1391,7 @@ const loadRecurringCalendar = useCallback(
       const depositColors = depositColorMap(rep);
 
       const result = await window.electronAPI.exportReportXlsx({
-        title: `Отчёт: ${getPeriodLabel(p)}${accountLabel}`,
+        title: `Отчёт: ${getPeriodLabel(p)}${accountLabel}${categoryLabel}`,
         period: `${p.startDate} — ${p.endDate}`,
         startBalance: rep.startBalance,
         totalDeposits: rep.totalDeposits,
@@ -1800,6 +1802,7 @@ const handleOpenReleases = async () => {
         <ReportModal
           period={period}
           accounts={accounts}
+          categories={categories}
           defaultAccountId={accounts.find((a) => a.is_default === 1)?.id ?? accounts[0]?.id ?? null}
           onClose={() => setModal(null)}
           onExport={handleExport}

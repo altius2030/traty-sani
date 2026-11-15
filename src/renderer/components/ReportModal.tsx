@@ -14,7 +14,7 @@ import {
   ChevronDown,
   Printer,
 } from 'lucide-react';
-import type { Period, Report, AccountBalance } from '../types';
+import type { Period, Report, AccountBalance, Category } from '../types';
 import { formatMoney, getPeriodLabel, previousPeriod, percentChange, monthBounds, toISODate } from '../lib/format';
 import { depositColorMap, expenseColorMap } from '../lib/reportColors';
 import { ChangeBadge } from '../lib/changeBadge';
@@ -23,9 +23,11 @@ interface ReportModalProps {
   period: Period;
   accounts: AccountBalance[];
   defaultAccountId: number | null;
+  /** Категории трат — для фильтра отчёта */
+  categories: Category[];
   onClose: () => void;
-  onExport: (report: Report, period: Period, accountName?: string) => void;
-  onExportXlsx: (report: Report, period: Period, accountName?: string) => void;
+  onExport: (report: Report, period: Period, accountName?: string, categoryName?: string) => void;
+  onExportXlsx: (report: Report, period: Period, accountName?: string, categoryName?: string) => void;
 }
 
 type ReportTab = 'all' | 'expenses' | 'deposits' | 'year';
@@ -37,7 +39,7 @@ const TABS: { id: ReportTab; label: string }[] = [
   { id: 'year', label: 'За год' },
 ];
 
-export default function ReportModal({ period, accounts, defaultAccountId, onClose, onExport, onExportXlsx }: ReportModalProps) {
+export default function ReportModal({ period, accounts, defaultAccountId, categories, onClose, onExport, onExportXlsx }: ReportModalProps) {
   const [report, setReport] = useState<Report | null>(null);
   /** Отчёт за предыдущий период той же длины — для сравнения */
   const [prevReport, setPrevReport] = useState<Report | null>(null);
@@ -45,6 +47,8 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(defaultAccountId);
   /** Раскрытая категория — под ней показываются её операции */
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  /** Фильтр по категории трат. null — все категории */
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   /**
    * Собственный период отчёта. Отличается от периода таблицы: отчёт можно
    * открыть за квартал, не переключая основной экран. Стартует с периода
@@ -67,8 +71,8 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
     // отчёт всё равно должен показываться, просто без значков сравнения.
     const prev = previousPeriod(reportStart, reportEnd);
     Promise.all([
-      window.electronAPI.getReport(reportStart, reportEnd, selectedAccountId),
-      window.electronAPI.getReport(prev.startDate, prev.endDate, selectedAccountId).catch(() => null),
+      window.electronAPI.getReport(reportStart, reportEnd, selectedAccountId, selectedCategoryId),
+      window.electronAPI.getReport(prev.startDate, prev.endDate, selectedAccountId, selectedCategoryId).catch(() => null),
     ])
       .then(([data, prevData]: [Report, Report | null]) => {
         if (!cancelled) {
@@ -84,7 +88,7 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
     return () => {
       cancelled = true;
     };
-  }, [reportStart, reportEnd, selectedAccountId]);
+  }, [reportStart, reportEnd, selectedAccountId, selectedCategoryId]);
 
   // Сводка по месяцам — год берём из даты конца отчёта. Грузится лениво,
   // только когда открыли вкладку: данные не нужны остальным вкладкам.
@@ -165,27 +169,52 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
           {/* Счёт для отчёта: по умолчанию — основной счёт, но можно выбрать
               любой другой. Отчёт строится по операциям выбранного счёта,
               а не по всем счетам вместе. */}
-          {accounts.length > 0 && (
-            <div className="report-account">
-              <label className="form-label" htmlFor="report-account" style={{ marginRight: 8 }}>
-                Счёт
-              </label>
-              <select
-                id="report-account"
-                value={selectedAccountId ?? ''}
-                onChange={(e) => setSelectedAccountId(e.target.value ? Number(e.target.value) : null)}
-              >
-                {/* «Все счета» — сводный отчёт без разбивки по счетам. Нужен,
-                    когда вопрос не «сколько на карте», а «сколько всего». */}
-                <option value="">Все счета</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} — {formatMoney(a.balance)}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
+          <div className="report-filters">
+            {accounts.length > 0 && (
+              <div className="report-account">
+                <label className="form-label" htmlFor="report-account" style={{ marginRight: 8 }}>
+                  Счёт
+                </label>
+                <select
+                  id="report-account"
+                  value={selectedAccountId ?? ''}
+                  onChange={(e) => setSelectedAccountId(e.target.value ? Number(e.target.value) : null)}
+                >
+                  {/* «Все счета» — сводный отчёт без разбивки по счетам. Нужен,
+                      когда вопрос не «сколько на карте», а «сколько всего». */}
+                  <option value="">Все счета</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name} — {formatMoney(a.balance)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {categories.length > 0 && (
+              <div className="report-account">
+                <label className="form-label" htmlFor="report-category" style={{ marginRight: 8 }}>
+                  Категория
+                </label>
+                <select
+                  id="report-category"
+                  value={selectedCategoryId ?? ''}
+                  onChange={(e) => setSelectedCategoryId(e.target.value ? Number(e.target.value) : null)}
+                >
+                  <option value="">Все категории</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                  {/* Записи, чья категория была удалена, остаются с NULL.
+                      Их тоже надо уметь посмотреть отдельно. */}
+                  <option value="-1">Без категории</option>
+                </select>
+              </div>
+            )}
+          </div>
         </div>
 
         {loading ? (
@@ -194,7 +223,44 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
           </div>
         ) : report ? (
           <>
-            {tab === 'all' && (
+            {/* Отчёт по категории: балансовые карточки здесь не показываем —
+                они считаются по всем операциям и с частичной выборкой трат
+                просто не сходятся. Вместо них свои итоги категории. */}
+            {tab === 'all' && report.categoryFiltered && (
+              <div className="report-summary">
+                <div className="summary-card">
+                  <div className="summary-label">Категория</div>
+                  <div className="summary-value neutral" style={{ fontSize: 15 }}>
+                    {selectedCategoryId === -1
+                      ? 'Без категории'
+                      : categories.find((c) => c.id === selectedCategoryId)?.name ?? '—'}
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-label">
+                    <TrendingDown size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                    Траты по категории
+                  </div>
+                  <div className="summary-value negative">
+                    −{formatMoney(report.totalExpenses)}
+                  </div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-label">Операций</div>
+                  <div className="summary-value neutral">{report.expenses.length}</div>
+                </div>
+                <div className="summary-card">
+                  <div className="summary-label">Средняя трата</div>
+                  <div className="summary-value neutral">
+                    {formatMoney(
+                      report.expenses.length ? report.totalExpenses / report.expenses.length : 0
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {tab === 'all' && !report.categoryFiltered && (
             <div className="report-summary">
               <div className="summary-card">
                 <div className="summary-label">
@@ -287,7 +353,7 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
 
             {/* Разбивка кредитов. В карточках выше это одно число «взято минус
                 возвращено», здесь видно, из чего оно сложилось. */}
-            {tab === 'all' && (report.loanTaken > 0 || report.loanRepaid > 0) && (
+            {tab === 'all' && !report.categoryFiltered && (report.loanTaken > 0 || report.loanRepaid > 0) && (
               <div className="loan-report-row">
                 <HandCoins size={14} />
                 <span>
@@ -304,7 +370,7 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
 
             {/* Удержание агрегаторов — не трата, а вычет из дохода, поэтому
                 в «Траты» его нет и показывается отдельной строкой. */}
-            {tab === 'all' && report.withheldByAggregators > 0 && (
+            {tab === 'all' && !report.categoryFiltered && report.withheldByAggregators > 0 && (
               <div className="loan-report-row">
                 <TrendingUp size={14} />
                 <span>
@@ -382,7 +448,7 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
               </div>
             )}
 
-            {tab === 'all' && (
+            {tab === 'all' && !report.categoryFiltered && (
             <>
             {/* Движение денег: начало → внесения → траты → расчётный выход */}
             <div className="deposit-summary-card" style={{ marginBottom: 20 }}>
@@ -463,6 +529,7 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
               // прошедших дней месяца и экстраполируем на остаток месяца.
               // Показываем только для текущего месяца и только если данные
               // не за весь месяц — иначе прогноз равен факту и только путает.
+              if (report.categoryFiltered) return null;
               const { start: mStart, end: mEnd } = monthBounds(reportEnd);
               const today = toISODate(new Date());
               const effectiveEnd = reportEnd > today ? today : reportEnd;
@@ -965,11 +1032,11 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                 <Printer size={18} />
                 Печать / PDF
               </button>
-              <button className="btn btn-secondary" onClick={() => onExportXlsx(report, { preset: 'custom', startDate: reportStart, endDate: reportEnd }, accounts.find(a => a.id === selectedAccountId)?.name)}>
+              <button className="btn btn-secondary" onClick={() => onExportXlsx(report, { preset: 'custom', startDate: reportStart, endDate: reportEnd }, accounts.find(a => a.id === selectedAccountId)?.name, selectedCategoryId ? (selectedCategoryId === -1 ? 'Без категории' : categories.find(c => c.id === selectedCategoryId)?.name) : undefined)}>
                 <Sheet size={18} />
                 Экспорт в Excel
               </button>
-              <button className="btn btn-primary" onClick={() => onExport(report, { preset: 'custom', startDate: reportStart, endDate: reportEnd }, accounts.find(a => a.id === selectedAccountId)?.name)}>
+              <button className="btn btn-primary" onClick={() => onExport(report, { preset: 'custom', startDate: reportStart, endDate: reportEnd }, accounts.find(a => a.id === selectedAccountId)?.name, selectedCategoryId ? (selectedCategoryId === -1 ? 'Без категории' : categories.find(c => c.id === selectedCategoryId)?.name) : undefined)}>
                 <FileDown size={18} />
                 Экспорт в CSV
               </button>

@@ -2486,11 +2486,18 @@ input::placeholder {
   width: 145px;
 }
 
-/* Счёт для отчёта — рядом с вкладками. По умолчанию выбран основной счёт. */
+/* Счёт и категория для отчёта — рядом с вкладками */
+.report-filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 0 0 16px;
+}
+
 .report-account {
   display: flex;
   align-items: center;
-  margin: -4px 0 16px;
 }
 
 .report-account select {

@@ -318,6 +318,8 @@ export interface Report {
   /** Внесения, сгруппированные по категориям внесений */
   byDepositCategory: Record<string, { total: number; color: string | null }>;
   period: { startDate: string; endDate: string };
+  /** Отчёт отфильтрован по категории трат — балансовые блоки не показываем */
+  categoryFiltered?: boolean;
 }
 
 export type PeriodPreset = 'today' | 'week' | 'month' | 'quarter' | 'year' | 'custom';
