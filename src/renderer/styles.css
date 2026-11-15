@@ -2321,6 +2321,92 @@ input::placeholder {
   border-bottom: 1px solid var(--border-color);
 }
 
+/* Сводный экран */
+.summary-modal {
+  max-width: 720px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.summary-tile {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  display: block;
+}
+
+button.summary-tile,
+[role='button'].summary-tile {
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+button.summary-tile:hover,
+[role='button'].summary-tile:hover {
+  border-color: var(--accent-primary);
+}
+
+.summary-label {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.summary-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.summary-top {
+  margin-top: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+}
+
+.summary-top-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.summary-top-date {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+}
+
+.summary-top-cat {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-top-sum {
+  font-weight: 600;
+  color: var(--accent-danger);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Календарный вид в отчёте */
 .calendar {
   background: var(--bg-card);

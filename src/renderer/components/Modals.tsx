@@ -12,6 +12,10 @@ import {
   Pencil,
   Check,
   GitMerge,
+  Bell,
+  FileDown,
+  HandCoins,
+  Wallet,
 } from 'lucide-react';
 import type {
   Category,
@@ -20,8 +24,13 @@ import type {
   DepositCategory,
   UpdateStatus,
   AccountBalance,
+  Expense,
+  Deposit,
+  LoanItem,
+  RecurringItem,
+  Period,
 } from '../types';
-import { toISODate, formatMoney } from '../lib/format';
+import { toISODate, formatMoney, getPeriodLabel } from '../lib/format';
 import { CATEGORY_ICONS, getCategoryIcon, CHART_COLORS } from '../lib/icons';
 
 interface AddExpenseModalProps {
@@ -1178,6 +1187,184 @@ export function UpdateModal({
               {status.state === 'checking' ? 'Проверяю…' : 'Проверить обновление'}
             </button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Сводный экран: главные цифры одним взглядом.
+ *
+ * Не заменяет отчёт и таблицу — отвечает на вопрос «как дела сейчас»:
+ * сколько денег, сколько должно уйти, что пора оплатить. Отсюда же
+ * открываются остальные окна.
+ */
+export function SummaryModal({
+  accounts,
+  currentBalance,
+  baseCheckpoint,
+  period,
+  expenses,
+  deposits,
+  loans,
+  dueRecurring,
+  recurringMonthly,
+  onClose,
+  onOpenLoans,
+  onOpenRecurring,
+  onOpenReport,
+}: {
+  accounts: AccountBalance[];
+  currentBalance: number;
+  baseCheckpoint: { amount: number; date: string | null };
+  period: Period;
+  expenses: Expense[];
+  deposits: Deposit[];
+  loans: LoanItem[];
+  dueRecurring: RecurringItem[];
+  recurringMonthly: number;
+  onClose: () => void;
+  onOpenLoans: () => void;
+  onOpenRecurring: () => void;
+  onOpenReport: () => void;
+}) {
+  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+  const totalDeposits = deposits.reduce((s, d) => s + d.amount, 0);
+  const openLoans = loans.filter((l) => l.remaining > 0.001);
+  const loanDebt = openLoans.reduce((s, l) => s + l.remaining, 0);
+  const overdueLoans = openLoans.filter((l) => l.is_overdue);
+  const top = [...expenses].sort((a, b) => b.amount - a.amount).slice(0, 5);
+  const selected = accounts.find((a) => a.is_default === 1) ?? accounts[0];
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal summary-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Сводка</h2>
+          <button className="modal-close" onClick={onClose} aria-label="Закрыть">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="summary-grid">
+          <div className="summary-tile">
+            <div className="summary-label">
+              <Wallet size={13} style={{ marginRight: 5 }} />
+              Остаток
+            </div>
+            <div
+              className="summary-value"
+              style={{
+                color: currentBalance >= 0 ? 'var(--accent-primary)' : 'var(--accent-danger)',
+              }}
+            >
+              {formatMoney(currentBalance)}
+            </div>
+            {selected && (
+              <div className="summary-sub">
+                {selected.name}: {formatMoney(selected.balance)}
+              </div>
+            )}
+            {baseCheckpoint.date && (
+              <div className="summary-sub">
+                отметка {formatMoney(baseCheckpoint.amount)} от{' '}
+                {new Date(`${baseCheckpoint.date}T00:00:00`).toLocaleDateString('ru-RU')}
+              </div>
+            )}
+          </div>
+
+          <div className="summary-tile">
+            <div className="summary-label">{getPeriodLabel(period)}</div>
+            <div className="summary-sub" style={{ marginTop: 8 }}>
+              Внесения{' '}
+              <strong style={{ color: 'var(--accent-primary)' }}>
+                +{formatMoney(totalDeposits)}
+              </strong>
+            </div>
+            <div className="summary-sub">
+              Траты{' '}
+              <strong style={{ color: 'var(--accent-danger)' }}>−{formatMoney(totalExpenses)}</strong>
+            </div>
+            <div className="summary-sub">
+              Итого{' '}
+              <strong
+                style={{
+                  color: totalDeposits - totalExpenses >= 0 ? 'var(--accent-primary)' : 'var(--accent-danger)',
+                }}
+              >
+                {totalDeposits - totalExpenses >= 0 ? '+' : '−'}
+                {formatMoney(Math.abs(totalDeposits - totalExpenses))}
+              </strong>
+            </div>
+          </div>
+
+          <div className="summary-tile" onClick={onOpenLoans} role="button" tabIndex={0}>
+            <div className="summary-label">
+              <HandCoins size={13} style={{ marginRight: 5 }} />
+              Долги
+            </div>
+            <div
+              className="summary-value"
+              style={{ color: loanDebt > 0 ? 'var(--accent-purple)' : 'var(--accent-primary)' }}
+            >
+              {formatMoney(loanDebt)}
+            </div>
+            <div className="summary-sub">
+              {openLoans.length === 0
+                ? 'долгов нет'
+                : `${openLoans.length} шт.` + (overdueLoans.length ? ` · просрочено ${overdueLoans.length}` : '')}
+            </div>
+            {recurringMonthly > 0 && (
+              <div className="summary-sub">регулярных расходов {formatMoney(recurringMonthly)}/мес</div>
+            )}
+          </div>
+
+          <div className="summary-tile" onClick={onOpenRecurring} role="button" tabIndex={0}>
+            <div className="summary-label">
+              <Bell size={13} style={{ marginRight: 5 }} />
+              Пора оплатить
+            </div>
+            <div
+              className="summary-value"
+              style={{ color: dueRecurring.length ? 'var(--accent-danger)' : 'var(--accent-primary)' }}
+            >
+              {dueRecurring.length}
+            </div>
+            <div className="summary-sub">
+              {dueRecurring.length ? 'нажмите, чтобы открыть' : 'ничего не просрочено'}
+            </div>
+          </div>
+        </div>
+
+        {top.length > 0 && (
+          <div className="summary-top">
+            <div className="summary-label" style={{ marginBottom: 8 }}>
+              Крупнейшие траты за {getPeriodLabel(period)}
+            </div>
+            {top.map((e) => (
+              <div key={e.id} className="summary-top-row">
+                <span className="summary-top-date">
+                  {new Date(`${e.date}T00:00:00`).toLocaleDateString('ru-RU', {
+                    day: '2-digit',
+                    month: '2-digit',
+                  })}
+                </span>
+                <span className="summary-top-cat">{e.category_name || 'Без категории'}</span>
+                <span className="summary-top-sum">−{formatMoney(e.amount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="modal-footer">
+          <button className="btn btn-ghost" onClick={onClose}>
+            Закрыть
+          </button>
+          <button className="btn btn-primary" onClick={onOpenReport}>
+            <FileDown size={18} />
+            Отчёт
+          </button>
         </div>
       </div>
     </div>

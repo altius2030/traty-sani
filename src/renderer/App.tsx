@@ -9,6 +9,7 @@ import AddExpenseModal, {
   ConfirmModal,
   EditDepositModal,
   EditExpenseModal,
+  SummaryModal,
   UpdateModal,
 } from './components/Modals';
 import ReportModal from './components/ReportModal';
@@ -235,6 +236,7 @@ function App() {
     | { type: 'balance' }
     | { type: 'categories' }
     | { type: 'report' }
+    | { type: 'summary' }
     | { type: 'update' }
     | { type: 'repeatExpense'; expense: Expense }
     | { type: 'repeatDeposit'; deposit: Deposit }
@@ -1501,6 +1503,17 @@ const handleOpenReleases = async () => {
                 role="menuitem"
                 onClick={() => {
                   setFileMenuOpen(false);
+                  setModal({ type: 'summary' });
+                }}
+              >
+                <Wallet size={15} />
+                Сводка
+              </button>
+              <button
+                className="file-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setFileMenuOpen(false);
                   setModal({ type: 'balance' });
                 }}
               >
@@ -1795,6 +1808,24 @@ const handleOpenReleases = async () => {
           onRenameDepositCategory={handleRenameDepositCategory}
           onMergeCategories={handleMergeCategories}
           onSetDepositColor={handleSetDepositColor}
+        />
+      )}
+
+      {modal?.type === 'summary' && (
+        <SummaryModal
+          accounts={accounts}
+          currentBalance={currentBalance}
+          baseCheckpoint={baseCheckpoint}
+          period={period}
+          expenses={expenses}
+          deposits={deposits}
+          loans={loans}
+          dueRecurring={dueRecurring}
+          recurringMonthly={recurringMonthly}
+          onClose={() => setModal(null)}
+          onOpenLoans={() => setModal({ type: 'loans' })}
+          onOpenRecurring={() => setModal({ type: 'recurring' })}
+          onOpenReport={() => setModal({ type: 'report' })}
         />
       )}
 
