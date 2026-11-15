@@ -110,6 +110,14 @@ export function percentChange(current: number, previous: number): number | null 
   return ((current - previous) / Math.abs(previous)) * 100;
 }
 
+/** Границы календарного месяца, в котором лежит дата */
+export function monthBounds(dateISO: string): { start: string; end: string } {
+  const d = new Date(`${dateISO}T00:00:00`);
+  const start = new Date(d.getFullYear(), d.getMonth(), 1);
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  return { start: toISODate(start), end: toISODate(end) };
+}
+
 /** Подпись для процентной разницы: «+12%», «−8%» или null, если нечинать */
 export function formatChange(pct: number | null): string {
   if (pct === null) return 'новый';

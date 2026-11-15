@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import type { Report } from '../types';
 import { formatMoney } from '../lib/format';
 import { depositColorMap, expenseColorMap } from '../lib/reportColors';
+import { assignChartColors } from '../lib/icons';
 
 /**
  * Графики для отчёта. Сделаны на голом SVG, без внешних библиотек:
@@ -23,11 +25,14 @@ function DonutChart({
   total,
   centerLabel = 'Всего',
   emptyLabel = 'Нет расходов за период',
+  onSliceClick,
 }: {
   data: Slice[];
   total: number;
   centerLabel?: string;
   emptyLabel?: string;
+  /** Клик по сектору — для перехода на уровень подкатегорий */
+  onSliceClick?: (label: string) => void;
 }) {
   const size = 200;
   const stroke = 34;
@@ -64,7 +69,12 @@ function DonutChart({
                 strokeDasharray={dash}
                 strokeDashoffset={-(offset + gapHere / 2)}
                 strokeLinecap="butt"
-              />
+                className={onSliceClick ? 'chart-slice' : undefined}
+                style={onSliceClick ? { cursor: 'pointer' } : undefined}
+                onClick={onSliceClick ? () => onSliceClick(slice.label) : undefined}
+              >
+                <title>{`${slice.label}: ${formatMoney(slice.value)}`}</title>
+              </circle>
             );
             offset += full;
             return el;
@@ -209,16 +219,32 @@ export default function ReportCharts({
   report: Report;
   mode?: ChartMode;
 }) {
+  // Уровень детализации: null — категории, строка — подкатегории этой категории.
+  const [drill, setDrill] = useState<string | null>(null);
   // Цвета раздаёт общий модуль: те же оттенки показываются в точках таблиц
   // отчёта, иначе данные выглядели бы неоднозначно.
   const expenseColors = expenseColorMap(report);
   const expenseEntries = Object.entries(report.byCategory)
     .map(([label, v]) => ({ label, value: v.total }))
     .sort((a, b) => b.value - a.value);
-  const slices: Slice[] = expenseEntries.map((e) => ({
-    ...e,
-    color: expenseColors[e.label],
-  }));
+  // Мелкие категории схлопываем в «Прочее», иначе кольцо превращается в
+  // кашу из двухпиксельных секторов. Порог — 3% от итога. В таблице ниже
+  // все категории остаются поимённо, поэтому данные не теряются.
+  const rawTotal = expenseEntries.reduce((s, x) => s + x.value, 0);
+  const OTHER_LABEL = 'Прочее';
+  const OTHER_THRESHOLD = 0.03;
+  const slices: Slice[] = [];
+  let otherSum = 0;
+  for (const e of expenseEntries) {
+    if (rawTotal > 0 && e.value / rawTotal < OTHER_THRESHOLD) {
+      otherSum += e.value;
+    } else {
+      slices.push({ ...e, color: expenseColors[e.label] });
+    }
+  }
+  if (otherSum > 0) {
+    slices.push({ label: OTHER_LABEL, value: otherSum, color: '#9aa4b2' });
+  }
 
   const total = slices.reduce((s, x) => s + x.value, 0);
 
@@ -277,16 +303,60 @@ export default function ReportCharts({
   const showIncomeDonut = wantDeposits && incomeSlices.length > 0;
   const showDays = days.length > 0;
 
+  // Детализация: подкатегории выбранной категории. Клик по сектору кольца.
+  const drillData = drill ? report.byCategory[drill] : undefined;
+  const drillSlices: Slice[] = (() => {
+    if (!drillData) return [];
+    const entries = Object.entries(drillData.subcategories)
+      .map(([label, v]) => ({ label, value: v.total, color: null }))
+      .sort((a, b) => b.value - a.value);
+    const colors = assignChartColors(entries);
+    return entries.map((s, i) => ({ ...s, color: colors[i] }));
+  })();
+  const drillTotal = drillSlices.reduce((s, x) => s + x.value, 0);
+  // Подкатегории могут не покрывать всю категорию — остаток показываем
+  // отдельным серым сектором «Без подкатегории», иначе кольцо соврёт.
+  const drillRest = drillData ? drillData.total - drillTotal : 0;
+
   if (!showExpenseDonut && !showIncomeDonut && !showDays) {
     return null;
   }
 
   return (
     <div className="charts-block">
-      {showExpenseDonut && (
+      {showExpenseDonut && !drill && (
         <div className="chart-card">
           <div className="breakdown-title">Расходы по категориям</div>
-          <DonutChart data={slices} total={total} />
+          <DonutChart data={slices} total={total} onSliceClick={(label) => setDrill(label)} />
+          <div className="chart-hint">Нажмите на категорию, чтобы увидеть подкатегории</div>
+        </div>
+      )}
+
+      {showExpenseDonut && drill && (
+        <div className="chart-card">
+          <div className="breakdown-title">
+            {drill}: подкатегории
+            <button
+              className="btn btn-ghost"
+              style={{ marginLeft: 12, padding: '2px 8px', fontSize: 12 }}
+              onClick={() => setDrill(null)}
+            >
+              ← Все категории
+            </button>
+          </div>
+          {drillSlices.length > 0 ? (
+            <DonutChart
+              data={
+                drillRest > 0
+                  ? [...drillSlices, { label: 'Без подкатегории', value: drillRest, color: '#9aa4b2' }]
+                  : drillSlices
+              }
+              total={drillData!.total}
+              centerLabel={drill}
+            />
+          ) : (
+            <div className="chart-empty">У этой категории нет подкатегорий</div>
+          )}
         </div>
       )}
 

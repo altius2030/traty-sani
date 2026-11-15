@@ -14,7 +14,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import type { Period, Report, AccountBalance } from '../types';
-import { formatMoney, getPeriodLabel, previousPeriod, percentChange } from '../lib/format';
+import { formatMoney, getPeriodLabel, previousPeriod, percentChange, monthBounds, toISODate } from '../lib/format';
 import { depositColorMap, expenseColorMap } from '../lib/reportColors';
 import { ChangeBadge } from '../lib/changeBadge';
 
@@ -438,8 +438,62 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
               </div>
             </div>
 
-            {report.baseCheckpoint.date && (
-              <div
+            {(() => {
+              // Прогноз на конец месяца: берём траты периода, делим на число
+              // прошедших дней месяца и экстраполируем на остаток месяца.
+              // Показываем только для текущего месяца и только если данные
+              // не за весь месяц — иначе прогноз равен факту и только путает.
+              const { start: mStart, end: mEnd } = monthBounds(reportEnd);
+              const today = toISODate(new Date());
+              const effectiveEnd = reportEnd > today ? today : reportEnd;
+              if (effectiveEnd < mStart || effectiveEnd > mEnd) return null;
+              const elapsedDays =
+                Math.round(
+                  (new Date(`${effectiveEnd}T00:00:00`).getTime() -
+                    new Date(`${mStart}T00:00:00`).getTime()) /
+                    86400000
+                ) + 1;
+              const totalDays =
+                Math.round(
+                  (new Date(`${mEnd}T00:00:00`).getTime() -
+                    new Date(`${mStart}T00:00:00`).getTime()) /
+                    86400000
+                ) + 1;
+              if (elapsedDays >= totalDays || report.totalExpenses <= 0) return null;
+              const avgDaily = report.totalExpenses / elapsedDays;
+              const remaining = totalDays - elapsedDays;
+              const projected = report.endBalance - avgDaily * remaining;
+              const monthLabel = new Date(`${mStart}T00:00:00`).toLocaleDateString('ru-RU', {
+                month: 'long',
+              });
+              return (
+                <div className="forecast-card">
+                  <div className="summary-label" style={{ marginBottom: 4 }}>
+                    Прогноз на конец {monthLabel}
+                  </div>
+                  <div className="forecast-row">
+                    <span>В среднем в день</span>
+                    <strong>{formatMoney(avgDaily)}</strong>
+                  </div>
+                  <div className="forecast-row">
+                    <span>Осталось дней</span>
+                    <strong>{remaining}</strong>
+                  </div>
+                  <div className="forecast-row">
+                    <span>Остаток к концу месяца</span>
+                    <strong
+                      style={{
+                        color: projected >= 0 ? 'var(--accent-primary)' : 'var(--accent-danger)',
+                      }}
+                    >
+                      ≈ {formatMoney(projected)}
+                    </strong>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {report.baseCheckpoint.date && (              <div
                 style={{
                   fontSize: 12,
                   color: 'var(--text-muted)',
@@ -595,6 +649,49 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                           </Fragment>
                           );
                         })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Крупнейшие траты периода — часто именно они объясняют всю
+                    картину, а не размазанные по категориям суммы */}
+                {(tab === 'all' || tab === 'expenses') && report.expenses.length > 0 && (
+                  <div className="report-breakdown">
+                    <div className="breakdown-title">Крупнейшие траты</div>
+                    <table className="breakdown-table">
+                      <thead>
+                        <tr>
+                          <th>Дата</th>
+                          <th>Категория</th>
+                          <th style={{ textAlign: 'right', width: 160 }}>Сумма</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...report.expenses]
+                          .sort((a, b) => b.amount - a.amount)
+                          .slice(0, 7)
+                          .map((e) => (
+                            <tr key={`top-${e.id}`}>
+                              <td className="date-cell">
+                                {new Date(e.date).toLocaleDateString('ru-RU', {
+                                  day: '2-digit',
+                                  month: '2-digit',
+                                })}
+                              </td>
+                              <td>
+                                {e.category_name || 'Без категории'}
+                                {e.note ? (
+                                  <span className="breakdown-op-note" style={{ marginLeft: 8 }}>
+                                    {e.note}
+                                  </span>
+                                ) : null}
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                                −{formatMoney(e.amount)}
+                              </td>
+                            </tr>
+                          ))}
                       </tbody>
                     </table>
                   </div>

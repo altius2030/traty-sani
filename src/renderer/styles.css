@@ -2321,6 +2321,40 @@ input::placeholder {
   border-bottom: 1px solid var(--border-color);
 }
 
+/* Подсказка под кольцом и кликабельные сектора */
+.chart-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.chart-slice:hover {
+  opacity: 0.85;
+}
+
+/* Прогноз на конец месяца в отчёте */
+.forecast-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.forecast-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.forecast-row strong {
+  font-variant-numeric: tabular-nums;
+}
+
 /* График остатка по дням в отчёте */
 .chart-balance {
   display: flex;
