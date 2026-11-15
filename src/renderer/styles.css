@@ -2321,6 +2321,108 @@ input::placeholder {
   border-bottom: 1px solid var(--border-color);
 }
 
+/* Календарный вид в отчёте */
+.calendar {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+}
+
+.calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.calendar-title {
+  font-size: 15px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.calendar-wd {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-align: center;
+  padding-bottom: 4px;
+}
+
+.calendar-cell {
+  min-height: 74px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calendar-cell.empty {
+  border: none;
+}
+
+.calendar-day {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.calendar-expense,
+.calendar-deposit {
+  font-size: 10px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-expense {
+  color: var(--accent-danger);
+}
+
+.calendar-deposit {
+  color: var(--accent-primary);
+}
+
+.calendar-legend {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.calendar-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.calendar-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+}
+
+.calendar-swatch-expense {
+  background: var(--accent-danger);
+}
+
+.calendar-swatch-deposit {
+  background: var(--accent-primary);
+}
+
 /* Траты по дням недели в отчёте */
 .chart-weekday {
   display: flex;

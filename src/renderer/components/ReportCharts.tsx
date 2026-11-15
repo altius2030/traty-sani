@@ -461,8 +461,104 @@ export default function ReportCharts({
   );
 }
 
-/** Данные для графиков попадают и в CSV — отдельными секциями */
-export function buildChartCsv(report: Report): string[] {
+/**
+ * Календарный вид: сетка месяца с суммой трат и внесений по дням.
+ *
+ * Показывает не «сколько всего», а ритм: в какие дни были закупы, где
+ * провалы. Пустые дни не рисуем цифр — сетка остаётся читаемой.
+ */
+export function CalendarView({
+  report,
+  month,
+  onPrev,
+  onNext,
+}: {
+  report: Report;
+  /** 'YYYY-MM' — какой месяц показывать */
+  month: string;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const [y, m] = month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  // Смещение первого дня: понедельник — первый столбец
+  const lead = (first.getDay() + 6) % 7;
+
+  const byDay = new Map<number, { expense: number; deposit: number }>();
+  for (const e of report.expenses) {
+    const d = new Date(`${e.date}T00:00:00`).getDate();
+    const cur = byDay.get(d) || { expense: 0, deposit: 0 };
+    cur.expense += e.amount;
+    byDay.set(d, cur);
+  }
+  for (const dep of report.deposits) {
+    const d = new Date(`${dep.date}T00:00:00`).getDate();
+    const cur = byDay.get(d) || { expense: 0, deposit: 0 };
+    cur.deposit += dep.amount;
+    byDay.set(d, cur);
+  }
+
+  const cells: (number | null)[] = [
+    ...Array.from({ length: lead }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+
+  const monthName = first.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  const WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+  return (
+    <div className="calendar">
+      <div className="calendar-head">
+        <button className="btn btn-ghost" onClick={onPrev} aria-label="Предыдущий месяц">
+          ←
+        </button>
+        <div className="calendar-title">{monthName}</div>
+        <button className="btn btn-ghost" onClick={onNext} aria-label="Следующий месяц">
+          →
+        </button>
+      </div>
+      <div className="calendar-grid">
+        {WD.map((w) => (
+          <div key={w} className="calendar-wd">
+            {w}
+          </div>
+        ))}
+        {cells.map((day, i) => {
+          if (day === null) return <div key={`e${i}`} className="calendar-cell empty" />;
+          const v = byDay.get(day);
+          return (
+            <div key={day} className="calendar-cell">
+              <div className="calendar-day">{day}</div>
+              {v && v.expense > 0 && (
+                <div className="calendar-expense" title={`Траты ${formatMoney(v.expense)}`}>
+                  −{formatMoney(v.expense)}
+                </div>
+              )}
+              {v && v.deposit > 0 && (
+                <div className="calendar-deposit" title={`Внесения ${formatMoney(v.deposit)}`}>
+                  +{formatMoney(v.deposit)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <div className="calendar-legend">
+        <span className="calendar-legend-item">
+          <span className="calendar-swatch calendar-swatch-expense" />
+          траты
+        </span>
+        <span className="calendar-legend-item">
+          <span className="calendar-swatch calendar-swatch-deposit" />
+          внесения
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Данные для графиков попадают и в CSV — отдельными секциями */export function buildChartCsv(report: Report): string[] {
   const lines: string[] = [];
 
   lines.push('');

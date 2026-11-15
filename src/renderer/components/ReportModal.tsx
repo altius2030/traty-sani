@@ -1,5 +1,5 @@
 import { useEffect, useState, Fragment } from 'react';
-import ReportCharts from './ReportCharts';
+import ReportCharts, { CalendarView } from './ReportCharts';
 import {
   X,
   FileDown,
@@ -30,13 +30,14 @@ interface ReportModalProps {
   onExportXlsx: (report: Report, period: Period, accountName?: string, categoryName?: string) => void;
 }
 
-type ReportTab = 'all' | 'expenses' | 'deposits' | 'year';
+type ReportTab = 'all' | 'expenses' | 'deposits' | 'year' | 'calendar';
 
 const TABS: { id: ReportTab; label: string }[] = [
   { id: 'all', label: 'Общий отчёт' },
   { id: 'expenses', label: 'Траты' },
   { id: 'deposits', label: 'Внесения' },
   { id: 'year', label: 'За год' },
+  { id: 'calendar', label: 'Календарь' },
 ];
 
 export default function ReportModal({ period, accounts, defaultAccountId, categories, onClose, onExport, onExportXlsx }: ReportModalProps) {
@@ -709,7 +710,28 @@ export default function ReportModal({ period, accounts, defaultAccountId, catego
               </div>
             )}
 
-            {tab !== 'year' && !((tab === 'expenses' && report.expenses.length === 0) ||
+            {/* Календарь: месяц сеткой. Стрелки меняют период отчёта на
+                соседний месяц — иначе данные не совпали бы с сеткой. */}
+            {tab === 'calendar' && (
+              <CalendarView
+                report={report}
+                month={`${reportEnd.slice(0, 7)}`}
+                onPrev={() => {
+                  const [yy, mm] = reportEnd.slice(0, 7).split('-').map(Number);
+                  const prev = new Date(yy, mm - 2, 1);
+                  setReportStart(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-01`);
+                  setReportEnd(`${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}-${String(new Date(prev.getFullYear(), prev.getMonth() + 1, 0).getDate()).padStart(2, '0')}`);
+                }}
+                onNext={() => {
+                  const [yy, mm] = reportEnd.slice(0, 7).split('-').map(Number);
+                  const next = new Date(yy, mm, 1);
+                  setReportStart(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-01`);
+                  setReportEnd(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()).padStart(2, '0')}`);
+                }}
+              />
+            )}
+
+            {tab !== 'year' && tab !== 'calendar' && !((tab === 'expenses' && report.expenses.length === 0) ||
               (tab === 'deposits' && report.deposits.length === 0) ||
               (tab === 'all' && report.expenses.length === 0 && report.deposits.length === 0)) && (
               <>
