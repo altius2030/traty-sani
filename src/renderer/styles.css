@@ -2321,6 +2321,51 @@ input::placeholder {
   border-bottom: 1px solid var(--border-color);
 }
 
+/* График остатка по дням в отчёте */
+.chart-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chart-balance svg {
+  width: 100%;
+  height: 180px;
+  display: block;
+}
+
+.chart-balance-zero {
+  stroke: var(--border-color);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.chart-balance-area {
+  fill: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+}
+
+.chart-balance-line {
+  fill: none;
+  stroke: var(--accent-primary);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.chart-balance-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.chart-balance-range {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* Строка категории в отчёте — кликабельная, раскрывает свои операции */
 .breakdown-category-row {
   cursor: pointer;
@@ -2387,6 +2432,24 @@ input::placeholder {
 .change-badge.neutral {
   color: var(--text-muted);
   background: var(--bg-muted, rgba(128, 128, 128, 0.12));
+}
+
+/* Собственный период отчёта — даты от/до в шапке окна */
+.report-period {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 16px;
+}
+
+.report-period input[type="date"] {
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  width: 145px;
 }
 
 /* Счёт для отчёта — рядом с вкладками. По умолчанию выбран основной счёт. */

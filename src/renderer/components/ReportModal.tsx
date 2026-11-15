@@ -43,6 +43,13 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(defaultAccountId);
   /** Раскрытая категория — под ней показываются её операции */
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  /**
+   * Собственный период отчёта. Отличается от периода таблицы: отчёт можно
+   * открыть за квартал, не переключая основной экран. Стартует с периода
+   * таблицы, но живёт своей жизнью, пока открыто окно.
+   */
+  const [reportStart, setReportStart] = useState(period.startDate);
+  const [reportEnd, setReportEnd] = useState(period.endDate);
 
   // Точки в таблицах берут те же цвета, что и сектора диаграмм
   const expenseColors = report ? expenseColorMap(report) : {};
@@ -54,9 +61,9 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
     setLoading(true);
     // Прошлый период нужен только для сравнения. Если он не загрузится —
     // отчёт всё равно должен показываться, просто без значков сравнения.
-    const prev = previousPeriod(period.startDate, period.endDate);
+    const prev = previousPeriod(reportStart, reportEnd);
     Promise.all([
-      window.electronAPI.getReport(period.startDate, period.endDate, selectedAccountId),
+      window.electronAPI.getReport(reportStart, reportEnd, selectedAccountId),
       window.electronAPI.getReport(prev.startDate, prev.endDate, selectedAccountId).catch(() => null),
     ])
       .then(([data, prevData]: [Report, Report | null]) => {
@@ -73,7 +80,7 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
     return () => {
       cancelled = true;
     };
-  }, [period.startDate, period.endDate, selectedAccountId]);
+  }, [reportStart, reportEnd, selectedAccountId]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -83,11 +90,39 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
         <div className="report-head">
           <div className="modal-header">
             <h2 className="modal-title">
-              Отчёт: {getPeriodLabel(period)}
+              Отчёт: {getPeriodLabel({ preset: 'custom', startDate: reportStart, endDate: reportEnd })}
             </h2>
             <button className="modal-close" onClick={onClose} aria-label="Закрыть">
               <X size={20} />
             </button>
+          </div>
+
+          {/* Собственный период отчёта — не зависит от периода таблицы */}
+          <div className="report-period">
+            <input
+              type="date"
+              value={reportStart}
+              onChange={(e) => setReportStart(e.target.value)}
+              aria-label="Начало отчёта"
+            />
+            <span style={{ color: 'var(--text-muted)' }}>—</span>
+            <input
+              type="date"
+              value={reportEnd}
+              onChange={(e) => setReportEnd(e.target.value)}
+              aria-label="Конец отчёта"
+            />
+            {/* Возврат к периоду таблицы — если отчёт отъехал от него */}
+            {(reportStart !== period.startDate || reportEnd !== period.endDate) && (
+              <button
+                className="btn btn-ghost"
+                style={{ padding: '4px 8px', fontSize: 12 }}
+                onClick={() => { setReportStart(period.startDate); setReportEnd(period.endDate); }}
+                title="Вернуть период таблицы"
+              >
+                Период таблицы
+              </button>
+            )}
           </div>
 
           <div className="report-tabs" role="tablist">
@@ -724,11 +759,11 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
               <button className="btn btn-ghost" onClick={onClose}>
                 Закрыть
               </button>
-              <button className="btn btn-secondary" onClick={() => onExportXlsx(report, period, accounts.find(a => a.id === selectedAccountId)?.name)}>
+              <button className="btn btn-secondary" onClick={() => onExportXlsx(report, { preset: 'custom', startDate: reportStart, endDate: reportEnd }, accounts.find(a => a.id === selectedAccountId)?.name)}>
                 <Sheet size={18} />
                 Экспорт в Excel
               </button>
-              <button className="btn btn-primary" onClick={() => onExport(report, period, accounts.find(a => a.id === selectedAccountId)?.name)}>
+              <button className="btn btn-primary" onClick={() => onExport(report, { preset: 'custom', startDate: reportStart, endDate: reportEnd }, accounts.find(a => a.id === selectedAccountId)?.name)}>
                 <FileDown size={18} />
                 Экспорт в CSV
               </button>

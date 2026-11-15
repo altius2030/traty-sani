@@ -101,9 +101,68 @@ function DonutChart({
   );
 }
 
+/**
+ * График остатка по дням: накопительный баланс от начала периода.
+ *
+ * В отличие от столбцов трат/внесений, показывает не поток, а запас денег:
+ * видно, когда он проседал и когда рос. Строится из той же истории, что и
+ * карточка «Начало (база)»: старт + внесения − траты по дням.
+ */
+function BalanceChart({ points }: { points: { label: string; value: number }[] }) {
+  const width = 560;
+  const height = 180;
+  const padX = 8;
+  const padTop = 16;
+  const padBottom = 26;
+  const innerW = width - padX * 2;
+  const innerH = height - padTop - padBottom;
+
+  if (points.length === 0) return <div className="chart-empty">Нет операций за период</div>;
+
+  const values = points.map((p) => p.value);
+  // Ноль всегда в шкале: уход в минус должен быть виден, а не обрезан.
+  const min = Math.min(0, ...values);
+  const max = Math.max(0, ...values);
+  const span = max - min || 1;
+
+  const x = (i: number) => padX + (points.length === 1 ? innerW / 2 : (i / (points.length - 1)) * innerW);
+  const y = (v: number) => padTop + innerH - ((v - min) / span) * innerH;
+
+  const zeroY = y(0);
+  const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`).join(' ');
+  const area = `${line} L ${x(points.length - 1).toFixed(1)} ${zeroY.toFixed(1)} L ${x(0).toFixed(1)} ${zeroY.toFixed(1)} Z`;
+
+  return (
+    <div className="chart-balance">
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" role="img">
+        {/* Линия нуля: по ней видно, уходил ли остаток в минус */}
+        <line
+          x1={padX}
+          x2={width - padX}
+          y1={zeroY}
+          y2={zeroY}
+          className="chart-balance-zero"
+        />
+        <path d={area} className="chart-balance-area" />
+        <path d={line} className="chart-balance-line" />
+      </svg>
+      {/* Подписи дат: первая, середина, последняя — иначе при большом периоде
+          подписи слипнутся в кашу */}
+      <div className="chart-balance-labels">
+        {points.length > 0 && <span>{points[0].label}</span>}
+        {points.length > 2 && <span>{points[Math.floor(points.length / 2)].label}</span>}
+        {points.length > 1 && <span>{points[points.length - 1].label}</span>}
+      </div>
+      <div className="chart-balance-range">
+        <span>{formatMoney(max)}</span>
+        <span>{formatMoney(min)}</span>
+      </div>
+    </div>
+  );
+}
+
 /** Столбчатая диаграмма: траты по дням периода */
-function BarChart({
-  data,
+function BarChart({  data,
   mode,
 }: {
   data: { label: string; expense: number; deposit: number }[];
@@ -196,6 +255,22 @@ export default function ReportCharts({
       deposit: v.deposit,
     }));
 
+  // Остаток по дням: старт периода + накопительный итог внесений и трат.
+  // Используем полный набор дней (не .slice(0,31)), иначе график обрывался бы
+  // на первом месяце квартала. Подписей всё равно три, так что длинный
+  // период читается.
+  const balancePoints = [...byDay.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([date, v]) => ({
+      label: new Date(date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }),
+      value: v.deposit - v.expense,
+    }));
+  let running = report.startBalance;
+  const balanceSeries = balancePoints.map((p) => {
+    running += p.value;
+    return { label: p.label, value: running };
+  });
+
   const wantExpenses = mode !== 'deposits';
   const wantDeposits = mode !== 'expenses';
   const showExpenseDonut = wantExpenses && slices.length > 0;
@@ -245,6 +320,13 @@ export default function ReportCharts({
             )}
           </div>
           <BarChart data={days} mode={mode} />
+        </div>
+      )}
+
+      {balanceSeries.length > 0 && (
+        <div className="chart-card">
+          <div className="breakdown-title">Остаток по дням</div>
+          <BalanceChart points={balanceSeries} />
         </div>
       )}
     </div>
