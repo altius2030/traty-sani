@@ -112,6 +112,38 @@ function DonutChart({
 }
 
 /**
+ * Траты по дням недели: в какие дни уходит больше всего.
+ *
+ * Показываем сумму, а не средний чек: вопрос именно «в какие дни тратите
+ * больше». Число операций уезжает в подсказку — по нему видно, большая ли
+ * сумма за счёт одной крупной траты или за счёт частых мелких.
+ */
+function WeekdayChart({ points }: { points: { label: string; value: number; count: number }[] }) {
+  const max = Math.max(1, ...points.map((p) => p.value));
+
+  return (
+    <div className="chart-weekday">
+      {points.map((p) => (
+        <div
+          key={p.label}
+          className="chart-weekday-col"
+          title={`${p.label}: ${formatMoney(p.value)} · ${p.count} оп.`}
+        >
+          <div className="chart-weekday-track">
+            <div
+              className="chart-weekday-bar"
+              style={{ height: `${(p.value / max) * 100}%` }}
+            />
+          </div>
+          <div className="chart-weekday-value">{formatMoney(p.value)}</div>
+          <div className="chart-weekday-label">{p.label}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
  * График остатка по дням: накопительный баланс от начала периода.
  *
  * В отличие от столбцов трат/внесений, показывает не поток, а запас денег:
@@ -297,6 +329,24 @@ export default function ReportCharts({
     return { label: p.label, value: running };
   });
 
+  // Траты по дням недели. Порядок — с понедельника, как привычнее в
+  // деловом календаре; getDay() считает воскресенье нулём, поэтому сдвигаем.
+  const WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  const wdMap = new Map<number, { value: number; count: number }>();
+  for (const e of report.expenses) {
+    const day = new Date(`${e.date}T00:00:00`).getDay();
+    const idx = (day + 6) % 7;
+    const cur = wdMap.get(idx) || { value: 0, count: 0 };
+    cur.value += e.amount;
+    cur.count += 1;
+    wdMap.set(idx, cur);
+  }
+  const weekdaySeries = WD.map((label, idx) => ({
+    label,
+    value: wdMap.get(idx)?.value ?? 0,
+    count: wdMap.get(idx)?.count ?? 0,
+  }));
+
   const wantExpenses = mode !== 'deposits';
   const wantDeposits = mode !== 'expenses';
   const showExpenseDonut = wantExpenses && slices.length > 0;
@@ -397,6 +447,14 @@ export default function ReportCharts({
         <div className="chart-card">
           <div className="breakdown-title">Остаток по дням</div>
           <BalanceChart points={balanceSeries} />
+        </div>
+      )}
+
+      {wantExpenses && weekdaySeries.some((d) => d.count > 0) && (
+        <div className="chart-card">
+          <div className="breakdown-title">Траты по дням недели</div>
+          <div className="chart-hint">Сумма трат за все дни недели периода</div>
+          <WeekdayChart points={weekdaySeries} />
         </div>
       )}
     </div>
