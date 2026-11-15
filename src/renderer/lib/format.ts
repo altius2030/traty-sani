@@ -78,6 +78,47 @@ export function getPresetPeriod(preset: PeriodPreset): Period {
   return { preset, startDate: toISODate(startDate), endDate: toISODate(endDate) };
 }
 
+/**
+ * Предыдущий период той же длины, идущий непосредственно перед указанным.
+ *
+ * Нужен для сравнения в отчёте: «этот месяц против прошлого». Границы
+ * считаются по календарным датам, длина — ровно столько же дней, сколько
+ * в исходном периоде (включая обе границы).
+ */
+export function previousPeriod(startDate: string, endDate: string): Period {
+  const start = new Date(`${startDate}T00:00:00`);
+  const end = new Date(`${endDate}T00:00:00`);
+  const days = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+  const prevEnd = new Date(start.getTime() - 86400000);
+  const prevStart = new Date(prevEnd.getTime() - (days - 1) * 86400000);
+  return {
+    preset: 'custom',
+    startDate: toISODate(prevStart),
+    endDate: toISODate(prevEnd),
+  };
+}
+
+/**
+ * Разница в процентах между текущим и прошлым значением.
+ *
+ * Прошлое = 0 — особый случай: рост из нуля бесконечен, а падение до нуля
+ * невыразимо в процентах. Поэтому возвращаем null, и вызывающий код показывает
+ * «новый» или «−100%», а не бессмысленные ∞%.
+ */
+export function percentChange(current: number, previous: number): number | null {
+  if (previous === 0) return null;
+  return ((current - previous) / Math.abs(previous)) * 100;
+}
+
+/** Подпись для процентной разницы: «+12%», «−8%» или null, если нечинать */
+export function formatChange(pct: number | null): string {
+  if (pct === null) return 'новый';
+  const rounded = Math.round(pct);
+  if (rounded > 0) return `+${rounded}%`;
+  if (rounded < 0) return `−${Math.abs(rounded)}%`;
+  return '0%';
+}
+
 export function getPeriodLabel(period: Period): string {
   if (period.preset !== 'custom') {
     const labels: Record<string, string> = {

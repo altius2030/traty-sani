@@ -12,8 +12,9 @@ import {
   HandCoins,
 } from 'lucide-react';
 import type { Period, Report, AccountBalance } from '../types';
-import { formatMoney, getPeriodLabel } from '../lib/format';
+import { formatMoney, getPeriodLabel, previousPeriod, percentChange } from '../lib/format';
 import { depositColorMap, expenseColorMap } from '../lib/reportColors';
+import { ChangeBadge } from '../lib/changeBadge';
 
 interface ReportModalProps {
   period: Period;
@@ -34,6 +35,8 @@ const TABS: { id: ReportTab; label: string }[] = [
 
 export default function ReportModal({ period, accounts, defaultAccountId, onClose, onExport, onExportXlsx }: ReportModalProps) {
   const [report, setReport] = useState<Report | null>(null);
+  /** Отчёт за предыдущий период той же длины — для сравнения */
+  const [prevReport, setPrevReport] = useState<Report | null>(null);
   const [tab, setTab] = useState<ReportTab>('all');
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(defaultAccountId);
 
@@ -45,11 +48,17 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    window.electronAPI
-      .getReport(period.startDate, period.endDate, selectedAccountId)
-      .then((data: Report) => {
+    // Прошлый период нужен только для сравнения. Если он не загрузится —
+    // отчёт всё равно должен показываться, просто без значков сравнения.
+    const prev = previousPeriod(period.startDate, period.endDate);
+    Promise.all([
+      window.electronAPI.getReport(period.startDate, period.endDate, selectedAccountId),
+      window.electronAPI.getReport(prev.startDate, prev.endDate, selectedAccountId).catch(() => null),
+    ])
+      .then(([data, prevData]: [Report, Report | null]) => {
         if (!cancelled) {
           setReport(data);
+          setPrevReport(prevData);
           setLoading(false);
         }
       })
@@ -143,6 +152,13 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                 <div className="summary-value positive">
                   {report.totalDeposits > 0 ? '+' : ''}
                   {formatMoney(report.totalDeposits)}
+                  {prevReport && (
+                    <ChangeBadge
+                      pct={percentChange(report.totalDeposits, prevReport.totalDeposits)}
+                      goodWhen="up"
+                      title={`Прошлый период: ${formatMoney(prevReport.totalDeposits)}`}
+                    />
+                  )}
                 </div>
               </div>
               <div className="summary-card">
@@ -153,6 +169,13 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                 <div className="summary-value negative">
                   {report.totalExpenses > 0 ? '-' : ''}
                   {formatMoney(report.totalExpenses)}
+                  {prevReport && (
+                    <ChangeBadge
+                      pct={percentChange(report.totalExpenses, prevReport.totalExpenses)}
+                      goodWhen="down"
+                      title={`Прошлый период: ${formatMoney(prevReport.totalExpenses)}`}
+                    />
+                  )}
                 </div>
               </div>
               {/* Кредиты — отдельной графой, а не строкой под карточками.
@@ -191,6 +214,13 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                   }`}
                 >
                   {formatMoney(report.endBalance)}
+                  {prevReport && (
+                    <ChangeBadge
+                      pct={percentChange(report.endBalance, prevReport.endBalance)}
+                      goodWhen="up"
+                      title={`Прошлый период: ${formatMoney(prevReport.endBalance)}`}
+                    />
+                  )}
                 </div>
               </div>
             </div>
@@ -430,6 +460,11 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                         <tr>
                           <th>Категория / Подкатегория / Статья</th>
                           <th style={{ textAlign: 'right', width: 160 }}>Сумма</th>
+                          {prevReport && (
+                            <th style={{ textAlign: 'right', width: 74 }} title="Сравнение с прошлым периодом">
+                              Δ
+                            </th>
+                          )}
                         </tr>
                       </thead>
                       <tbody>
@@ -450,6 +485,15 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                               <td style={{ textAlign: 'right', fontWeight: 600 }}>
                                 {formatMoney(data.total)}
                               </td>
+                              {prevReport && (
+                                <td style={{ textAlign: 'right' }}>
+                                  <ChangeBadge
+                                    pct={percentChange(data.total, prevReport.byCategory[catName]?.total ?? 0)}
+                                    goodWhen="down"
+                                    title={`Прошлый период: ${formatMoney(prevReport.byCategory[catName]?.total ?? 0)}`}
+                                  />
+                                </td>
+                              )}
                             </tr>
                             {Object.entries(data.subcategories).map(([subName, sub]) => (
                               <Fragment key={`${catName}-${subName}`}>
@@ -458,6 +502,7 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                                   <td style={{ textAlign: 'right', color: 'var(--text-secondary)' }}>
                                     {formatMoney(sub.total)}
                                   </td>
+                                  {prevReport && <td />}
                                 </tr>
                                 {Object.entries(sub.items).map(([itemName, itemTotal]) => (
                                   <tr key={`${catName}-${subName}-${itemName}`}>
@@ -470,6 +515,7 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                                     >
                                       {formatMoney(itemTotal)}
                                     </td>
+                                    {prevReport && <td />}
                                   </tr>
                                 ))}
                               </Fragment>
