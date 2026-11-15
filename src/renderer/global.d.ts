@@ -284,6 +284,7 @@ export interface ElectronAPI {
   openReleasePage(): Promise<{ success: boolean }>;
   onUpdateStatus(cb: (status: UpdateStatus) => void): () => void;
   getReport(startDate: string, endDate: string, accountId?: number | null): Promise<any>;
+  getYearSummary(year: number, accountId?: number | null): Promise<any>;
   saveFile(
     defaultPath: string,
     content: string

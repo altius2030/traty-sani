@@ -1398,6 +1398,58 @@ const openLoanDebt = loans.reduce((sum, l) => sum + l.remaining, 0);
 });
 
 /**
+ * Сводка по месяцам года: 12 строк «месяц — внесения, траты».
+ *
+ * Считается одним запросом в базу, а не двенадцатью отчётами: отчёт за
+ * месяц учитывал бы отметки остатка и выдавал бы не то, что нужно. Здесь
+ * важны только обороты по операциям, поэтому группировка простая.
+ *
+ * Отметки «Указать остаток» в сводке не участвуют: они уже внутри операций
+ * месяца, в котором поставлены, и добавлять их отдельно значило бы считать
+ * деньги дважды.
+ */
+ipcMain.handle('db:getYearSummary', (_, { year, accountId }: { year: number; accountId?: number | null }) => {
+  const accountFilter = accountId ? 'AND account_id = ?' : '';
+  const params = (table: 'e' | 'd') =>
+    accountId ? [`${year}-01-01`, `${year}-12-31`, accountId] : [`${year}-01-01`, `${year}-12-31`];
+
+  const depRows = db!.prepare(
+    `SELECT strftime('%m', date) AS m, COALESCE(SUM(amount), 0) AS s
+     FROM deposits
+     WHERE date(date) BETWEEN date(?) AND date(?)
+       AND loan_id IS NULL
+       ${accountFilter}
+     GROUP BY m`
+  ).all(...params('d')) as { m: string; s: number }[];
+
+  const expRows = db!.prepare(
+    `SELECT strftime('%m', date) AS m, COALESCE(SUM(amount), 0) AS s
+     FROM expenses
+     WHERE date(date) BETWEEN date(?) AND date(?)
+       AND loan_id IS NULL
+       ${accountFilter}
+     GROUP BY m`
+  ).all(...params('e')) as { m: string; s: number }[];
+
+  const depMap = new Map(depRows.map((r) => [r.m, r.s]));
+  const expMap = new Map(expRows.map((r) => [r.m, r.s]));
+
+  const months = [];
+  for (let i = 1; i <= 12; i++) {
+    const key = String(i).padStart(2, '0');
+    const deposits = depMap.get(key) ?? 0;
+    const expenses = expMap.get(key) ?? 0;
+    months.push({
+      month: key,
+      deposits,
+      expenses,
+      net: deposits - expenses,
+    });
+  }
+  return { year, months };
+});
+
+/**
  * Экспорт отчёта в Excel с нативными графиками.
  * Файл собирает наш генератор OOXML: готовые библиотеки графики не умеют.
  */

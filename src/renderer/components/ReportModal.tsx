@@ -12,6 +12,7 @@ import {
   HandCoins,
   ChevronRight,
   ChevronDown,
+  Printer,
 } from 'lucide-react';
 import type { Period, Report, AccountBalance } from '../types';
 import { formatMoney, getPeriodLabel, previousPeriod, percentChange, monthBounds, toISODate } from '../lib/format';
@@ -27,12 +28,13 @@ interface ReportModalProps {
   onExportXlsx: (report: Report, period: Period, accountName?: string) => void;
 }
 
-type ReportTab = 'all' | 'expenses' | 'deposits';
+type ReportTab = 'all' | 'expenses' | 'deposits' | 'year';
 
 const TABS: { id: ReportTab; label: string }[] = [
   { id: 'all', label: 'Общий отчёт' },
   { id: 'expenses', label: 'Траты' },
   { id: 'deposits', label: 'Внесения' },
+  { id: 'year', label: 'За год' },
 ];
 
 export default function ReportModal({ period, accounts, defaultAccountId, onClose, onExport, onExportXlsx }: ReportModalProps) {
@@ -50,6 +52,8 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
    */
   const [reportStart, setReportStart] = useState(period.startDate);
   const [reportEnd, setReportEnd] = useState(period.endDate);
+  /** Сводка по месяцам — грузится только на вкладке «За год» */
+  const [yearData, setYearData] = useState<{ year: number; months: { month: string; deposits: number; expenses: number; net: number }[] } | null>(null);
 
   // Точки в таблицах берут те же цвета, что и сектора диаграмм
   const expenseColors = report ? expenseColorMap(report) : {};
@@ -81,6 +85,19 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
       cancelled = true;
     };
   }, [reportStart, reportEnd, selectedAccountId]);
+
+  // Сводка по месяцам — год берём из даты конца отчёта. Грузится лениво,
+  // только когда открыли вкладку: данные не нужны остальным вкладкам.
+  useEffect(() => {
+    if (tab !== 'year') return;
+    let cancelled = false;
+    const year = new Date(`${reportEnd}T00:00:00`).getFullYear();
+    window.electronAPI
+      .getYearSummary(year, selectedAccountId)
+      .then((data) => { if (!cancelled) setYearData(data); })
+      .catch(() => { if (!cancelled) setYearData(null); });
+    return () => { cancelled = true; };
+  }, [tab, reportEnd, selectedAccountId]);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -158,6 +175,9 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                 value={selectedAccountId ?? ''}
                 onChange={(e) => setSelectedAccountId(e.target.value ? Number(e.target.value) : null)}
               >
+                {/* «Все счета» — сводный отчёт без разбивки по счетам. Нужен,
+                    когда вопрос не «сколько на карте», а «сколько всего». */}
+                <option value="">Все счета</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.name} — {formatMoney(a.balance)}
@@ -539,7 +559,90 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
               return null;
             })()}
 
-            {!((tab === 'expenses' && report.expenses.length === 0) ||
+            {/* Вкладка «За год» — сводная таблица по месяцам. Графики здесь
+                не нужны: вопрос не «из чего», а «как шёл год». */}
+            {tab === 'year' && (
+              <div className="report-breakdown">
+                <div className="breakdown-title">
+                  Сводка за {yearData?.year ?? new Date(`${reportEnd}T00:00:00`).getFullYear()} год
+                  {selectedAccountId === null && ' · все счета'}
+                </div>
+                {!yearData ? (
+                  <div className="empty-state">
+                    <p>Загрузка…</p>
+                  </div>
+                ) : (
+                  <table className="breakdown-table">
+                    <thead>
+                      <tr>
+                        <th>Месяц</th>
+                        <th style={{ textAlign: 'right', width: 140 }}>Внесения</th>
+                        <th style={{ textAlign: 'right', width: 140 }}>Траты</th>
+                        <th style={{ textAlign: 'right', width: 140 }}>Итого</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {yearData.months.map((m) => (
+                        <tr key={m.month}>
+                          <td>
+                            {new Date(`${yearData.year}-${m.month}-01T00:00:00`).toLocaleDateString('ru-RU', {
+                              month: 'long',
+                            })}
+                          </td>
+                          <td style={{ textAlign: 'right', color: 'var(--accent-primary)' }}>
+                            +{formatMoney(m.deposits)}
+                          </td>
+                          <td style={{ textAlign: 'right', color: m.expenses > 0 ? 'var(--accent-danger)' : undefined }}>
+                            −{formatMoney(m.expenses)}
+                          </td>
+                          <td
+                            style={{
+                              textAlign: 'right',
+                              fontWeight: 600,
+                              color: m.net >= 0 ? 'var(--accent-primary)' : 'var(--accent-danger)',
+                            }}
+                          >
+                            {m.net >= 0 ? '+' : '−'}
+                            {formatMoney(Math.abs(m.net))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td>
+                          <strong>Итого за год</strong>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <strong>
+                            +{formatMoney(yearData.months.reduce((s, m) => s + m.deposits, 0))}
+                          </strong>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <strong>
+                            −{formatMoney(yearData.months.reduce((s, m) => s + m.expenses, 0))}
+                          </strong>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <strong>
+                            {(() => {
+                              const net = yearData.months.reduce((s, m) => s + m.net, 0);
+                              return (
+                                <span style={{ color: net >= 0 ? 'var(--accent-primary)' : 'var(--accent-danger)' }}>
+                                  {net >= 0 ? '+' : '−'}{formatMoney(Math.abs(net))}
+                                </span>
+                              );
+                            })()}
+                          </strong>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {tab !== 'year' && !((tab === 'expenses' && report.expenses.length === 0) ||
               (tab === 'deposits' && report.deposits.length === 0) ||
               (tab === 'all' && report.expenses.length === 0 && report.deposits.length === 0)) && (
               <>
@@ -855,6 +958,12 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
             <div className="modal-footer">
               <button className="btn btn-ghost" onClick={onClose}>
                 Закрыть
+              </button>
+              {/* Печать: системный диалог, где можно выбрать «Сохранить как PDF».
+                  Отчёт печатается через отдельную раскладку — см. print-CSS. */}
+              <button className="btn btn-secondary" onClick={() => window.print()}>
+                <Printer size={18} />
+                Печать / PDF
               </button>
               <button className="btn btn-secondary" onClick={() => onExportXlsx(report, { preset: 'custom', startDate: reportStart, endDate: reportEnd }, accounts.find(a => a.id === selectedAccountId)?.name)}>
                 <Sheet size={18} />

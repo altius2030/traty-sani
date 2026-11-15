@@ -3335,3 +3335,55 @@ input::placeholder {
     grid-template-columns: 1fr;
   }
 }
+
+/* Печать / PDF: печатаем только сам отчёт, без подложки и кнопок.
+   Диаграммы на бумаге не интерактивны, поэтому сектора оставляем цветными,
+   а подсказки и кнопку «Все категории» прячем. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .modal.report-modal,
+  .modal.report-modal * {
+    visibility: visible;
+  }
+
+  .modal-overlay {
+    position: static;
+    background: none;
+    padding: 0;
+    overflow: visible;
+  }
+
+  .modal.report-modal {
+    position: static;
+    width: 100%;
+    max-height: none;
+    box-shadow: none;
+    border: none;
+    overflow: visible;
+  }
+
+  .modal-close,
+  .modal-footer,
+  .chart-hint {
+    display: none !important;
+  }
+
+  .report-head {
+    position: static !important;
+  }
+
+  .charts-block {
+    break-inside: avoid;
+  }
+
+  .breakdown-table {
+    break-inside: auto;
+  }
+
+  .breakdown-table tr {
+    break-inside: avoid;
+  }
+}
