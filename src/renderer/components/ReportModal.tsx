@@ -10,6 +10,8 @@ import {
   Banknote,
   Sheet,
   HandCoins,
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
 import type { Period, Report, AccountBalance } from '../types';
 import { formatMoney, getPeriodLabel, previousPeriod, percentChange } from '../lib/format';
@@ -39,6 +41,8 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
   const [prevReport, setPrevReport] = useState<Report | null>(null);
   const [tab, setTab] = useState<ReportTab>('all');
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(defaultAccountId);
+  /** Раскрытая категория — под ней показываются её операции */
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
   // Точки в таблицах берут те же цвета, что и сектора диаграмм
   const expenseColors = report ? expenseColorMap(report) : {};
@@ -468,10 +472,26 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                         </tr>
                       </thead>
                       <tbody>
-                        {Object.entries(report.byCategory).map(([catName, data]) => (
+                        {Object.entries(report.byCategory).map(([catName, data]) => {
+                          const expanded = expandedCategory === catName;
+                          // Операции этой категории — раскрываются по клику.
+                          // Сортируем по убыванию суммы: сначала самые крупные.
+                          const items = report.expenses
+                            .filter((e) => (e.category_name || 'Без категории') === catName)
+                            .sort((a, b) => b.amount - a.amount);
+                          return (
                           <Fragment key={catName}>
-                            <tr>
+                            <tr
+                              className={`breakdown-category-row ${expanded ? 'expanded' : ''}`}
+                              onClick={() => setExpandedCategory(expanded ? null : catName)}
+                              title={expanded ? 'Свернуть' : 'Показать операции категории'}
+                            >
                               <td className="breakdown-category">
+                                {items.length > 0 ? (
+                                  expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />
+                                ) : (
+                                  <span style={{ width: 14, display: 'inline-block' }} />
+                                )}
                                 <span
                                   className="chart-legend-dot"
                                   style={{
@@ -495,6 +515,23 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                                 </td>
                               )}
                             </tr>
+                            {expanded && items.map((e) => (
+                              <tr key={`op-${catName}-${e.id}`} className="breakdown-op">
+                                <td className="breakdown-op-cell">
+                                  <span className="breakdown-op-date">
+                                    {new Date(e.date).toLocaleDateString('ru-RU', {
+                                      day: '2-digit',
+                                      month: '2-digit',
+                                    })}
+                                  </span>
+                                  {e.note ? <span className="breakdown-op-note">{e.note}</span> : null}
+                                </td>
+                                <td style={{ textAlign: 'right' }}>
+                                  −{formatMoney(e.amount)}
+                                </td>
+                                {prevReport && <td />}
+                              </tr>
+                            ))}
                             {Object.entries(data.subcategories).map(([subName, sub]) => (
                               <Fragment key={`${catName}-${subName}`}>
                                 <tr>
@@ -521,7 +558,8 @@ export default function ReportModal({ period, accounts, defaultAccountId, onClos
                               </Fragment>
                             ))}
                           </Fragment>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
