@@ -906,6 +906,31 @@ input::placeholder {
   border-bottom: none;
 }
 
+/* Кнопки в строке закреплены справа. Без этого при широкой таблице и
+   раздутой боковой панели колонка с кнопками уезжала за край окна, и
+   удалить/изменить было не видно — приходилось прокручивать вслепую. */
+.data-table thead th:last-child,
+.data-table tbody td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background: var(--bg-card);
+  box-shadow: -10px 0 10px -10px rgba(0, 0, 0, 0.35);
+}
+
+.data-table thead th:last-child {
+  z-index: 3;
+  background: var(--bg-secondary);
+}
+
+.data-table tbody tr:hover td:last-child {
+  background: var(--bg-hover);
+}
+
+.data-table tfoot td:last-child {
+  background: var(--bg-secondary);
+}
+
 .expense-row td.category-cell {
   display: flex;
   align-items: center;
@@ -1674,6 +1699,19 @@ input::placeholder {
 .account-list-actions {
   display: flex;
   gap: 2px;
+}
+
+/* Выбор того, какие счета показывать в списке */
+.account-view-select {
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
 }
 
 .account-add-btn {

@@ -104,6 +104,18 @@ export default function Sidebar({
   const [newAccountName, setNewAccountName] = useState('');
   const [editingAccount, setEditingAccount] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  /**
+   * Какие счета показывать в списке: null — все, иначе id одного счёта.
+   * Это отдельно от выбранного счёта (selectedAccountId), который фильтрует
+   * таблицу: здесь только внешний вид списка. Запоминается между запусками.
+   */
+  const ACCOUNT_VIEW_KEY = 'traty-sani:sidebar-account-view';
+  const [accountView, setAccountView] = useState<number | null>(() => {
+    const raw = localStorage.getItem(ACCOUNT_VIEW_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  });
   // Раскрытая категория: плитка → выезжающий список её подкатегорий
   const [openId, setOpenId] = useState<number | null>(null);
   const [width, setWidth] = useState<number>(() => {
@@ -417,6 +429,33 @@ export default function Sidebar({
             </div>
           </div>
 
+          {/* Какие счета показывать в списке: все или один. На таблицу это
+              не влияет — её фильтрует клик по счёту. */}
+          {accounts.length > 1 && (
+            <select
+              className="account-view-select"
+              value={accountView ?? ''}
+              onChange={(e) => {
+                const v = e.target.value ? Number(e.target.value) : null;
+                setAccountView(v);
+                try {
+                  localStorage.setItem(ACCOUNT_VIEW_KEY, v === null ? '' : String(v));
+                } catch {
+                  /* ignore */
+                }
+              }}
+              aria-label="Какие счета показывать"
+              title="Какие счета показывать в списке"
+            >
+              <option value="">Все счета</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          )}
+
           {newAccountOpen && (
             <form
               className="account-new"
@@ -449,17 +488,19 @@ export default function Sidebar({
             </form>
           )}
 
-          <button
-            className={`account-row account-row-all ${selectedAccountId === null ? 'active' : ''}`}
-            onClick={() => onSelectAccount(null)}
-          >
-            <span className="account-row-name">Все счета</span>
-            <span className="account-row-sum">
-              {formatMoney(accounts.reduce((s, a) => s + a.balance, 0))}
-            </span>
-          </button>
+          {accountView === null && (
+            <button
+              className={`account-row account-row-all ${selectedAccountId === null ? 'active' : ''}`}
+              onClick={() => onSelectAccount(null)}
+            >
+              <span className="account-row-name">Все счета</span>
+              <span className="account-row-sum">
+                {formatMoney(accounts.reduce((s, a) => s + a.balance, 0))}
+              </span>
+            </button>
+          )}
 
-          {accounts.map((a) => (
+          {(accountView === null ? accounts : accounts.filter((a) => a.id === accountView)).map((a) => (
             <div key={a.id} className={`account-row ${selectedAccountId === a.id ? 'active' : ''}`}>
               <button
                 className="account-row-main"

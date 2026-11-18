@@ -296,10 +296,10 @@ export default function ExpenseTable({
                 <tr>
                   <th style={{ width: 90 }}>Дата</th>
                   <th>Категория</th>
-                  <th style={{ width: 200 }}>Подкатегория</th>
+                  <th style={{ width: 160 }}>Подкатегория</th>
                   <th style={{ textAlign: 'right', width: 140 }}>Сумма</th>
                   <th>Комментарий</th>
-                  <th style={{ width: 50 }}></th>
+                  <th style={{ width: 120 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -441,7 +441,7 @@ export default function ExpenseTable({
                 <th style={{ width: 90 }}>Дата</th>
                 <th>Категория</th>
                 <th style={{ textAlign: 'right', width: 160 }}>Сумма</th>
-                <th style={{ width: 50 }}></th>
+                <th style={{ width: 120 }}></th>
               </tr>
             </thead>
             <tbody>
