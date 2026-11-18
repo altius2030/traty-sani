@@ -646,6 +646,30 @@ input::placeholder {
   margin-bottom: 4px;
 }
 
+/* Строка «Текущий остаток» + переключатель счёта */
+.sidebar-balance-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.sidebar-balance-head .sidebar-balance-label {
+  margin-bottom: 0;
+}
+
+/* Переключатель счёта в блоке остатка — компактный, в одну строку */
+.sidebar-balance-head .account-view-select {
+  width: auto;
+  max-width: 130px;
+  margin: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
 .sidebar-balance-value {
   font-size: 24px;
   font-weight: 700;

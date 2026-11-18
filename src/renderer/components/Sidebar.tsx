@@ -116,6 +116,9 @@ export default function Sidebar({
     const n = Number(raw);
     return Number.isFinite(n) && n > 0 ? n : null;
   });
+  /** Счёт, который сейчас показан в блоке остатка; null — все вместе */
+  const viewedAccount = accountView === null ? null : accounts.find((a) => a.id === accountView) ?? null;
+  const displayedBalance = viewedAccount ? viewedAccount.balance : currentBalance;
   // Раскрытая категория: плитка → выезжающий список её подкатегорий
   const [openId, setOpenId] = useState<number | null>(null);
   const [width, setWidth] = useState<number>(() => {
@@ -377,20 +380,63 @@ export default function Sidebar({
       <div className="sidebar-section" style={{ marginTop: 'auto' }}>
         <div className="sidebar-section-title">Баланс</div>
         <div className="sidebar-balance">
-          <div className="sidebar-balance-label">Текущий остаток</div>
+          <div className="sidebar-balance-head">
+            <div className="sidebar-balance-label">Текущий остаток</div>
+            {/* Какой счёт показывать: все вместе или один. Заодно управляет
+                списком счетов ниже — это один блок «слева снизу». */}
+            {accounts.length > 1 && (
+              <select
+                className="account-view-select"
+                value={accountView ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value ? Number(e.target.value) : null;
+                  setAccountView(v);
+                  try {
+                    localStorage.setItem(ACCOUNT_VIEW_KEY, v === null ? '' : String(v));
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                aria-label="Какой счёт показывать"
+                title="Какой счёт показывать в остатке и в списке"
+              >
+                <option value="">Все счета</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
           <div
             className="sidebar-balance-value"
             style={{
-              color: currentBalance >= 0 ? 'var(--accent-primary)' : 'var(--accent-danger)',
+              color: displayedBalance >= 0 ? 'var(--accent-primary)' : 'var(--accent-danger)',
             }}
           >
-            {formatMoney(currentBalance)}
+            {formatMoney(displayedBalance)}
           </div>
           <div className="sidebar-balance-hint">
-            {baseCheckpoint.date ? (
+            {viewedAccount ? (
               <>
-                отметка {formatMoney(baseCheckpoint.amount)} от{' '}
-                {new Date(baseCheckpoint.date).toLocaleDateString('ru-RU', {
+                счёт «{viewedAccount.name}»
+                {viewedAccount.baseDate && (
+                  <>
+                    <br />
+                    отметка {formatMoney(viewedAccount.base)} от{' '}
+                    {new Date(`${viewedAccount.baseDate}T00:00:00`).toLocaleDateString('ru-RU', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: '2-digit',
+                    })}
+                  </>
+                )}
+              </>
+            ) : baseCheckpoint.date ? (
+              <>
+                по всем счетам · отметка {formatMoney(baseCheckpoint.amount)} от{' '}
+                {new Date(`${baseCheckpoint.date}T00:00:00`).toLocaleDateString('ru-RU', {
                   day: '2-digit',
                   month: '2-digit',
                   year: '2-digit',
@@ -399,7 +445,7 @@ export default function Sidebar({
                 + все внесения и траты после неё
               </>
             ) : (
-              <>отметки не заданы — учитываются все операции</>
+              <>по всем счетам · отметки не заданы — учитываются все операции</>
             )}
           </div>
         </div>
@@ -428,33 +474,6 @@ export default function Sidebar({
               </button>
             </div>
           </div>
-
-          {/* Какие счета показывать в списке: все или один. На таблицу это
-              не влияет — её фильтрует клик по счёту. */}
-          {accounts.length > 1 && (
-            <select
-              className="account-view-select"
-              value={accountView ?? ''}
-              onChange={(e) => {
-                const v = e.target.value ? Number(e.target.value) : null;
-                setAccountView(v);
-                try {
-                  localStorage.setItem(ACCOUNT_VIEW_KEY, v === null ? '' : String(v));
-                } catch {
-                  /* ignore */
-                }
-              }}
-              aria-label="Какие счета показывать"
-              title="Какие счета показывать в списке"
-            >
-              <option value="">Все счета</option>
-              {accounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
-          )}
 
           {newAccountOpen && (
             <form

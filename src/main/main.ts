@@ -941,6 +941,23 @@ function getDerivedBalanceAt(dateStr: string, accountId?: number | null): {
       AND (date(date) > ? OR (date(date) = ? AND created_at > ?))
       AND date(date) <= date(?)
   `);
+  // Переводы между своими счетами. Без них итог по всем счетам разъезжался
+  // с суммой остатков: перевод, уже учтённый в отметке одного счёта,
+  // должен быть виден на другом. Сравнение — то же, что у внесений и трат:
+  // по паре (дата, время создания), иначе операция того же дня, что и
+  // отметка, потеряется.
+  const outStmt = db!.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS s FROM transfers
+    WHERE from_account_id = ?
+      AND (date(date) > ? OR (date(date) = ? AND created_at > ?))
+      AND date(date) <= date(?)
+  `);
+  const inStmt = db!.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS s FROM transfers
+    WHERE to_account_id = ?
+      AND (date(date) > ? OR (date(date) = ? AND created_at > ?))
+      AND date(date) <= date(?)
+  `);
 
   let balance = 0;
   let base = 0;
@@ -955,8 +972,10 @@ function getDerivedBalanceAt(dateStr: string, accountId?: number | null): {
 
     const dep = depStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
     const exp = expStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
+    const out = outStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
+    const inc = inStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
 
-    balance += (cp?.amount ?? 0) + dep.s - exp.s;
+    balance += (cp?.amount ?? 0) + dep.s - exp.s - out.s + inc.s;
     base += cp?.amount ?? 0;
     // Для подсказки под остатком показываем самую свежую отметку из всех
     if (cp && (baseDate === null || cp.d > baseDate)) baseDate = cp.d;
