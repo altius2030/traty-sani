@@ -233,6 +233,27 @@ export const SCHEMA_SQL = `
 
   CREATE INDEX IF NOT EXISTS idx_transfers_date ON transfers(date);
 
+  -- Списание: деньги ушли со счёта, но это не трата.
+  --
+  -- Разница с тратой принципиальная: трата — это расход в учёте (попадает в
+  -- отчёт «Траты» и в категории), а списание — просто уменьшение остатка
+  -- (деньги забрали на личное, потеряли, передали без возврата). Поэтому
+  -- отдельная таблица: тратные запросы не меняются вовсе и не могут
+  -- случайно включить списание в расход.
+  --
+  -- На общий остаток списание влияет (деньги реально уменьшились), поэтому
+  -- оно участвует в расчёте остатка наравне с тратами.
+  CREATE TABLE IF NOT EXISTS writeoffs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    amount REAL NOT NULL CHECK (amount > 0),
+    date TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_writeoffs_date ON writeoffs(date);
+
   -- Сколько удержал агрегатор в конкретной выплате, живёт в deposits и
   -- добавляется миграцией: см. migrateAggregators в applySchema.
 `;

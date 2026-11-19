@@ -13,6 +13,8 @@ import {
   ChevronRight,
   ChevronDown,
   Printer,
+  MinusCircle,
+  ArrowLeftRight,
 } from 'lucide-react';
 import type { Period, Report, AccountBalance, Category } from '../types';
 import { formatMoney, getPeriodLabel, previousPeriod, percentChange, monthBounds, toISODate } from '../lib/format';
@@ -500,6 +502,40 @@ export default function ReportModal({ period, accounts, defaultAccountId, catego
                   <span className="ledger-value" style={{ color: 'var(--accent-purple)' }}>
                     {report.loanNet > 0 ? '+' : report.loanNet < 0 ? '-' : ''}
                     {formatMoney(Math.abs(report.loanNet))}
+                  </span>
+                </div>
+              )}
+              {/* Списания — не траты, но остаток уменьшают. Без этой строки
+                  «На выходе» не сошлось бы с остальными. */}
+              {(report.writeoffs ?? 0) > 0 && (
+                <div className="ledger-row">
+                  <span className="ledger-label">
+                    <MinusCircle size={14} /> Списания
+                  </span>
+                  <span className="ledger-value" style={{ color: 'var(--accent-danger)' }}>
+                    −{formatMoney(report.writeoffs!)}
+                  </span>
+                </div>
+              )}
+              {/* Переводы по выбранному счёту. По всем счетам в сумме ноль,
+                  поэтому показываем только для одного счёта. */}
+              {(report.transferOut ?? 0) > 0 && (
+                <div className="ledger-row">
+                  <span className="ledger-label">
+                    <ArrowLeftRight size={14} /> Переводы отданные
+                  </span>
+                  <span className="ledger-value" style={{ color: 'var(--accent-danger)' }}>
+                    −{formatMoney(report.transferOut!)}
+                  </span>
+                </div>
+              )}
+              {(report.transferIn ?? 0) > 0 && (
+                <div className="ledger-row">
+                  <span className="ledger-label">
+                    <ArrowLeftRight size={14} /> Переводы полученные
+                  </span>
+                  <span className="ledger-value" style={{ color: 'var(--accent-primary)' }}>
+                    +{formatMoney(report.transferIn!)}
                   </span>
                 </div>
               )}

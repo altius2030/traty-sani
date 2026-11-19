@@ -203,6 +203,24 @@ export interface TransferItem {
 }
 
 /**
+ * Списание: деньги уменьшили остаток конкретного счёта, но это не трата.
+ *
+ * Пример — забрал деньги на личное или передал без возврата: в учёте это
+ * не расход (иначе он попал бы в отчёт «Траты» и раздул бы расходы), но
+ * деньги со счёта реально ушли.
+ */
+export interface WriteoffItem {
+  id: number;
+  account_id: number;
+  account_name: string;
+  account_color: string | null;
+  amount: number;
+  date: string;
+  note: string | null;
+  created_at: string;
+}
+
+/**
  * Заём: взяли на закуп, вернули через пару дней.
  *
  * Внесение при получении и трата при возврате помечены loan_id. Деньги идут
@@ -312,6 +330,14 @@ export interface Report {
   withheldByAggregators: number;
   /** Отметка «Указать остаток», на которую опирается расчёт */
   baseCheckpoint: { amount: number; date: string | null };
+  /**
+   * Списания за период: деньги ушли со счетов, но это не траты.
+   * Участвуют в уравнении остатка отдельной строкой.
+   */
+  writeoffs?: number;
+  /** Переводы со выбранного счёта (только для отчёта по одному счёту) */
+  transferOut?: number;
+  transferIn?: number;
   expenses: Expense[];
   deposits: Deposit[];
   byCategory: Record<string, CategoryBreakdown>;

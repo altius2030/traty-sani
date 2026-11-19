@@ -19,6 +19,7 @@ import ToastContainer from './components/ToastContainer';
 import { RecurringModal } from './components/Recurring';
 import { LoansIncomeModal } from './components/Loans';
 import { TransferModal } from './components/Transfers';
+import { WriteoffModal } from './components/Writeoffs';
 import { MovementsModal } from './components/Movements';
 import type {
   DepositCategory,
@@ -38,6 +39,7 @@ import type {
   AccountBalance,
   TransferItem,
   MoneyMovement,
+  WriteoffItem,
 } from './types';
 import type { MainTab } from './components/ExpenseTable';
 import {
@@ -210,6 +212,7 @@ function App() {
   const [accounts, setAccounts] = useState<AccountBalance[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
   const [transfers, setTransfers] = useState<TransferItem[]>([]);
+  const [writeoffs, setWriteoffs] = useState<WriteoffItem[]>([]);
   const [movementsData, setMovementsData] = useState<{
     movements: MoneyMovement[];
     withheld: number;
@@ -245,6 +248,7 @@ function App() {
     | { type: 'recurring' }
     | { type: 'loans' }
     | { type: 'transfers' }
+    | { type: 'writeoffs' }
     | { type: 'movements' }
     | null
   >(null);
@@ -344,6 +348,11 @@ const loadRecurring = useCallback(async () => {
     });
     setTransfers(data);
   }, [period]);
+
+  const loadWriteoffs = useCallback(async () => {
+    const data = await window.electronAPI.getWriteoffs();
+    setWriteoffs(data);
+  }, []);
 
   const loadMovements = useCallback(async () => {
     const data = await window.electronAPI.getMoneyMovements({
@@ -498,6 +507,11 @@ const loadRecurring = useCallback(async () => {
     if (modal?.type !== 'transfers') return;
     loadTransfers().catch(() => {});
   }, [modal?.type, loadTransfers]);
+
+  useEffect(() => {
+    if (modal?.type !== 'writeoffs') return;
+    loadWriteoffs().catch(() => {});
+  }, [modal?.type, loadWriteoffs]);
 
   // Движение денег живёт в своём окне и тоже подвязано к периоду
   useEffect(() => {
@@ -1253,6 +1267,57 @@ const handlePayRecurringByTitle = async (title: string, amount: number) => {
     addToast('Перевод удалён', 'info');
   };
 
+  // ——— Списания со счетов ———
+
+  const handleAddWriteoff = async (payload: {
+    accountId: number;
+    amount: number;
+    date: string;
+    note?: string;
+  }) => {
+    try {
+      const saved = await window.electronAPI.addWriteoff(payload);
+      await Promise.all([loadAccounts(), loadWriteoffs(), loadBalances()]);
+      addToast(
+        saved?.warning
+          ? `Списание ${formatMoney(payload.amount)} записано, но в остаток не вошло. ${saved.warning}`
+          : `Списание ${formatMoney(payload.amount)} со счёта записано`,
+        saved?.warning ? 'error' : 'success',
+        saved?.warning ? { duration: 12000 } : undefined
+      );
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Не удалось сохранить списание', 'error');
+    }
+  };
+
+  const handleUpdateWriteoff = async (payload: {
+    id: number;
+    accountId: number;
+    amount: number;
+    date: string;
+    note?: string;
+  }) => {
+    try {
+      const saved = await window.electronAPI.updateWriteoff(payload);
+      await Promise.all([loadAccounts(), loadWriteoffs(), loadBalances()]);
+      addToast(
+        saved?.warning
+          ? `Списание обновлено, но в остаток не вошло. ${saved.warning}`
+          : 'Списание обновлено',
+        saved?.warning ? 'error' : 'success',
+        saved?.warning ? { duration: 12000 } : undefined
+      );
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Не удалось обновить списание', 'error');
+    }
+  };
+
+  const handleDeleteWriteoff = async (id: number) => {
+    await window.electronAPI.deleteWriteoff(id);
+    await Promise.all([loadAccounts(), loadWriteoffs(), loadBalances()]);
+    addToast('Списание удалено', 'info');
+  };
+
   /**
  * Загрузка месяца для календаря.
  *
@@ -1657,6 +1722,7 @@ const handleOpenReleases = async () => {
           onRenameAccount={handleRenameAccount}
           onDeleteAccount={handleDeleteAccount}
           onOpenTransfer={() => setModal({ type: 'transfers' })}
+          onOpenWriteoffs={() => setModal({ type: 'writeoffs' })}
         />
 
         <ExpenseTable
@@ -1900,6 +1966,19 @@ const handleOpenReleases = async () => {
           onClose={() => setModal(null)}
           onAdd={handleAddTransfer}
           onDelete={handleDeleteTransfer}
+        />
+      )}
+
+      {modal?.type === 'writeoffs' && (
+        <WriteoffModal
+          accounts={accounts}
+          writeoffs={writeoffs}
+          defaultAccountId={selectedAccountId}
+          workingDate={workingDate}
+          onClose={() => setModal(null)}
+          onAdd={handleAddWriteoff}
+          onUpdate={handleUpdateWriteoff}
+          onDelete={handleDeleteWriteoff}
         />
       )}
 

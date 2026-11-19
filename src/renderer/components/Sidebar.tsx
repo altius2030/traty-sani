@@ -11,6 +11,7 @@ import {
   X,
   Check,
   ArrowLeftRight,
+  MinusCircle,
 } from 'lucide-react';
 import type { Category, Subcategory, Subitem, RecurringItem, AccountBalance } from '../types';
 import { RecurringBlock } from './Recurring';
@@ -47,6 +48,8 @@ interface SidebarProps {
   onRenameAccount: (id: number, name: string) => Promise<void>;
   onDeleteAccount: (id: number) => void;
   onOpenTransfer: () => void;
+  /** Открыть окно списаний со счетов */
+  onOpenWriteoffs: () => void;
 }
 
 const WIDTH_KEY = 'traty-sidebar-width';
@@ -99,6 +102,7 @@ export default function Sidebar({
   onRenameAccount,
   onDeleteAccount,
   onOpenTransfer,
+  onOpenWriteoffs,
 }: SidebarProps) {
   const [newAccountOpen, setNewAccountOpen] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
@@ -471,6 +475,14 @@ export default function Sidebar({
                 aria-label="Перевод между счетами"
               >
                 <ArrowLeftRight size={14} />
+              </button>
+              <button
+                className="account-add-btn"
+                onClick={onOpenWriteoffs}
+                title="Списать деньги со счёта (не трата)"
+                aria-label="Списать деньги со счёта"
+              >
+                <MinusCircle size={14} />
               </button>
             </div>
           </div>

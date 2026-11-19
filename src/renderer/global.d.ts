@@ -8,6 +8,7 @@ import type {
   AccountBalance,
   TransferItem,
   MoneyMovement,
+  WriteoffItem,
 } from './types';
 
 export type UpdateState =
@@ -211,6 +212,22 @@ export interface ElectronAPI {
     note?: string;
   }): Promise<{ id: number }>;
   deleteTransfer(id: number): Promise<{ success: boolean }>;
+  /** Списания: деньги ушли со счёта, но это не траты */
+  getWriteoffs(range?: { startDate: string; endDate: string }): Promise<WriteoffItem[]>;
+  addWriteoff(p: {
+    accountId: number;
+    amount: number;
+    date: string;
+    note?: string;
+  }): Promise<{ id: number; warning?: string }>;
+  updateWriteoff(p: {
+    id: number;
+    accountId: number;
+    amount: number;
+    date: string;
+    note?: string;
+  }): Promise<{ success: boolean; warning?: string }>;
+  deleteWriteoff(id: number): Promise<{ success: boolean }>;
 
   /** Займ: взятые деньги и возвраты не попадают в доходы и расходы */
   getLoans(): Promise<LoanItem[]>;

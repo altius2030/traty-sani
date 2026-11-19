@@ -958,6 +958,13 @@ function getDerivedBalanceAt(dateStr: string, accountId?: number | null): {
       AND (date(date) > ? OR (date(date) = ? AND created_at > ?))
       AND date(date) <= date(?)
   `);
+  // Списания уменьшают остаток счёта, но не являются тратой.
+  const woStmt = db!.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS s FROM writeoffs
+    WHERE account_id = ?
+      AND (date(date) > ? OR (date(date) = ? AND created_at > ?))
+      AND date(date) <= date(?)
+  `);
 
   let balance = 0;
   let base = 0;
@@ -974,8 +981,9 @@ function getDerivedBalanceAt(dateStr: string, accountId?: number | null): {
     const exp = expStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
     const out = outStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
     const inc = inStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
+    const wo = woStmt.get(acc.id, cpDate, cpDate, cpCreated, dateStr) as { s: number };
 
-    balance += (cp?.amount ?? 0) + dep.s - exp.s - out.s + inc.s;
+    balance += (cp?.amount ?? 0) + dep.s - exp.s - out.s + inc.s - wo.s;
     base += cp?.amount ?? 0;
     // Для подсказки под остатком показываем самую свежую отметку из всех
     if (cp && (baseDate === null || cp.d > baseDate)) baseDate = cp.d;
@@ -1394,6 +1402,44 @@ const withheld = db!.prepare(
    WHERE commission_amount IS NOT NULL AND ${loanFlowWhere}`
 ).get(...loanFlowParams) as { s: number };
 
+// Списания за период. Не траты, но остаток уменьшают, поэтому в уравнении
+// отчёта стоят отдельной строкой — иначе «На выходе» не сошлось бы.
+const writeoffWhere = cpInPeriod
+  ? `(date(w.date) > ? OR (date(w.date) = ? AND w.created_at > ?)) AND date(w.date) <= ?`
+  : `date(w.date) BETWEEN date(?) AND date(?)`;
+const writeoffBaseParams = cpInPeriod
+  ? [cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate]
+  : [startDate, endDate];
+const writeoffFilter = accountId ? 'AND w.account_id = ?' : '';
+const writeoffTotal = db!.prepare(
+  `SELECT COALESCE(SUM(amount), 0) AS s FROM writeoffs w
+   WHERE ${writeoffWhere} ${writeoffFilter}`
+).get(...(accountId ? [...writeoffBaseParams, accountId] : writeoffBaseParams)) as {
+  s: number;
+};
+
+// Переводы. В отчёте по одному счёту они меняют остаток (из одного уходит,
+// на другой приходит), поэтому нужны отдельными строками — иначе «На выходе»
+// не сходится с остальными. По всем счетам в сумме дают ноль и не показываются.
+let transferOut = 0;
+let transferIn = 0;
+if (accountId) {
+  const tWhere = cpInPeriod
+    ? `(date(t.date) > ? OR (date(t.date) = ? AND t.created_at > ?)) AND date(t.date) <= ?`
+    : `date(t.date) BETWEEN date(?) AND date(?)`;
+  const tParams = cpInPeriod
+    ? [cpInPeriod.d, cpInPeriod.d, cpInPeriod.ca, endDate]
+    : [startDate, endDate];
+  transferOut = (db!.prepare(
+    `SELECT COALESCE(SUM(amount), 0) AS s FROM transfers t
+     WHERE t.from_account_id = ? AND ${tWhere}`
+  ).get(accountId, ...tParams) as { s: number }).s;
+  transferIn = (db!.prepare(
+    `SELECT COALESCE(SUM(amount), 0) AS s FROM transfers t
+     WHERE t.to_account_id = ? AND ${tWhere}`
+  ).get(accountId, ...tParams) as { s: number }).s;
+}
+
 const loanRows = db!.prepare(
   `${LOAN_SELECT} ORDER BY l.date_due, l.id`
 ).all() as LoanRow[];
@@ -1420,6 +1466,11 @@ const openLoanDebt = loans.reduce((sum, l) => sum + l.remaining, 0);
     openLoanDebt,
     // Удержание агрегаторов за период — отдельной строкой, не расходом
     withheldByAggregators: withheld.s,
+    // Списания за период — тоже не расход, но остаток уменьшают
+    writeoffs: writeoffTotal.s,
+    // Переводы по выбранному счёту (заполняются только для одного счёта)
+    transferOut,
+    transferIn,
     loans: reportLoans,
     baseCheckpoint,
     expenses,
@@ -2004,9 +2055,14 @@ ipcMain.handle('db:getAccountBalances', () => {
        WHERE to_account_id = ? AND date(date) > ?`
     ).get(a.id, baseDate) as { s: number };
 
+    const writeoffs = db!.prepare(
+      `SELECT COALESCE(SUM(amount), 0) s FROM writeoffs
+       WHERE account_id = ? AND date(date) > ?`
+    ).get(a.id, baseDate) as { s: number };
+
     return {
       ...a,
-      balance: (cp?.amount ?? 0) + deposits.s - expenses.s - out.s + incoming.s,
+      balance: (cp?.amount ?? 0) + deposits.s - expenses.s - out.s + incoming.s - writeoffs.s,
       base: cp?.amount ?? 0,
       baseDate: cp?.d ?? null,
     };
@@ -2141,6 +2197,70 @@ ipcMain.handle(
 
 ipcMain.handle('db:deleteTransfer', (_, id: number) => {
   db!.prepare('DELETE FROM transfers WHERE id = ?').run(id);
+  return { success: true };
+});
+
+/** Списания: деньги ушли со счёта, но это не трата. */
+ipcMain.handle('db:getWriteoffs', (_, range?: { startDate: string; endDate: string }) => {
+  // Период необязателен: окно списаний — это справочник, и запись, датированную
+  // прошлым месяцем, нельзя прятать только потому, что сейчас открыт другой
+  // период. Иначе списание «пропадало» бы сразу после сохранения.
+  if (range?.startDate && range?.endDate) {
+    return db!.prepare(
+      `SELECT w.*, a.name AS account_name, a.color AS account_color
+       FROM writeoffs w
+       JOIN accounts a ON a.id = w.account_id
+       WHERE date(w.date) BETWEEN date(?) AND date(?)
+       ORDER BY date(w.date) DESC, w.created_at DESC`
+    ).all(range.startDate, range.endDate);
+  }
+  return db!.prepare(
+    `SELECT w.*, a.name AS account_name, a.color AS account_color
+     FROM writeoffs w
+     JOIN accounts a ON a.id = w.account_id
+     ORDER BY date(w.date) DESC, w.created_at DESC`
+  ).all();
+});
+
+ipcMain.handle(
+  'db:addWriteoff',
+  (_, p: { accountId: number; amount: number; date: string; note?: string }) => {
+    const amount = Number(p.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Сумма списания должна быть больше нуля');
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date || '')) throw new Error('Некорректная дата');
+    const acc = db!.prepare('SELECT id FROM accounts WHERE id = ?').get(Number(p.accountId));
+    if (!acc) throw new Error('Счёт не найден');
+    const res = db!.prepare(
+      `INSERT INTO writeoffs (account_id, amount, date, note) VALUES (?, ?, ?, ?)`
+    ).run(Number(p.accountId), amount, p.date, (p.note || '').trim() || null);
+    return { id: Number(res.lastInsertRowid), warning: checkBackdated(p.date) };
+  }
+);
+
+ipcMain.handle(
+  'db:updateWriteoff',
+  (_, p: { id: number; accountId: number; amount: number; date: string; note?: string }) => {
+    if (!p.id) throw new Error('Не указан id списания');
+    const existing = db!.prepare('SELECT id FROM writeoffs WHERE id = ?').get(p.id);
+    if (!existing) throw new Error('Списание не найдено');
+    const amount = Number(p.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new Error('Сумма списания должна быть больше нуля');
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date || '')) throw new Error('Некорректная дата');
+    const acc = db!.prepare('SELECT id FROM accounts WHERE id = ?').get(Number(p.accountId));
+    if (!acc) throw new Error('Счёт не найден');
+    db!.prepare(
+      `UPDATE writeoffs SET account_id = ?, amount = ?, date = ?, note = ? WHERE id = ?`
+    ).run(Number(p.accountId), amount, p.date, (p.note || '').trim() || null, p.id);
+    return { success: true, warning: checkBackdated(p.date) };
+  }
+);
+
+ipcMain.handle('db:deleteWriteoff', (_, id: number) => {
+  db!.prepare('DELETE FROM writeoffs WHERE id = ?').run(id);
   return { success: true };
 });
 

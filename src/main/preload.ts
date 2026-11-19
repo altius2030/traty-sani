@@ -89,6 +89,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     note?: string;
   }) => ipcRenderer.invoke('db:addTransfer', transfer),
   deleteTransfer: (id: number) => ipcRenderer.invoke('db:deleteTransfer', id),
+  getWriteoffs: (range?: { startDate: string; endDate: string }) =>
+    ipcRenderer.invoke('db:getWriteoffs', range),
+  addWriteoff: (p: { accountId: number; amount: number; date: string; note?: string }) =>
+    ipcRenderer.invoke('db:addWriteoff', p),
+  updateWriteoff: (p: { id: number; accountId: number; amount: number; date: string; note?: string }) =>
+    ipcRenderer.invoke('db:updateWriteoff', p),
+  deleteWriteoff: (id: number) => ipcRenderer.invoke('db:deleteWriteoff', id),
   getMoneyMovements: (range: { startDate: string; endDate: string }) =>
     ipcRenderer.invoke('db:getMoneyMovements', range),
 
